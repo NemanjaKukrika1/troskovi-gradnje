@@ -1,4 +1,5 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { supabase } from "./supabase";
 
 // ─── DIZAJN SISTEM ───────────────────────────────────────────────────────────
 const C = {
@@ -139,11 +140,22 @@ const ADMIN_PASS = "admin123";
 const fmtKM = (n) => Number(n).toLocaleString("bs-BA",{minimumFractionDigits:2,maximumFractionDigits:2})+" KM";
 const genId = () => Math.random().toString(36).slice(2,9);
 
-// ─── HOOKS ────────────────────────────────────────────────────────────────────
-function usePersist(key, init) {
-  const [val, setVal] = useState(() => { try { const s=localStorage.getItem(key); return s?JSON.parse(s):init; } catch { return init; } });
-  const set = (next) => setVal(prev => { const r=typeof next==="function"?next(prev):next; try{localStorage.setItem(key,JSON.stringify(r));}catch{} return r; });
-  return [val, set];
+// ─── SUPABASE ────────────────────────────────────────────────────────────────
+
+async function dbGet(key, fallback) {
+  try { const {data,error}=await supabase.from('settings').select('data').eq('key',key).single(); if(error||!data)return fallback; return data.data; } catch { return fallback; }
+}
+async function dbSet(key, value) {
+  try { await supabase.from('settings').upsert({key,data:value,updated_at:new Date().toISOString()}); } catch(e){console.error(e);}
+}
+async function upitiGet() {
+  try { const {data,error}=await supabase.from('upiti').select('*').order('created_at',{ascending:false}); if(error||!data)return INIT_UPITI; return data.map(r=>r.data); } catch { return INIT_UPITI; }
+}
+async function upitiUpsert(upit) {
+  try { await supabase.from('upiti').upsert({id:upit.id,data:upit,created_at:new Date().toISOString()}); } catch(e){console.error(e);}
+}
+async function upitiUpdate(upit) {
+  try { await supabase.from('upiti').update({data:upit}).eq('id',upit.id); } catch(e){console.error(e);}
 }
 
 // ─── SHARED UI ────────────────────────────────────────────────────────────────
@@ -220,10 +232,43 @@ function AdminLogin({onLogin,onCancel}) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeKatChange,onBack}) {
+function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUpiti,fazeKatProp,onFazeKatChange,onBack}) {
   const [tab,setTab] = useState("dashboard");
+  // Lokalni state — ne šalje u bazu dok ne klikneš Sačuvaj
+  const [kategorije,setKategorijeLok] = useState(katInit);
+  const [fazeKat,setFazeKatLok] = useState(fazeKatProp);
+  const [katPromjene,setKatPromjene] = useState(false);
+  const [fazePromjene,setFazePromjene] = useState(false);
+  const [sprema,setSprema] = useState(false);
+
+  // Wrapper koji prati promjene lokalno
+  const setKategorije = (next) => {
+    setKategorijeLok(prev => {
+      const r = typeof next === "function" ? next(prev) : next;
+      setKatPromjene(true);
+      return r;
+    });
+  };
+  const sacuvajFazeKat = (next) => {
+    setFazeKatLok(next);
+    setFazePromjene(true);
+  };
+
+  // Sačuvaj sve u bazu
+  const sacuvajUSbazu = async () => {
+    setSprema(true);
+    if (katPromjene) { await syncKategorije(kategorije); setKatPromjene(false); }
+    if (fazePromjene) { onFazeKatChange(fazeKat); setFazePromjene(false); }
+    setSprema(false);
+    flash("Sve izmjene sačuvane u bazu ✓");
+  };
+
+  const imaPromjena = katPromjene || fazePromjene;
+
   const [aktKat,setAktKat] = useState(kategorije[0]?.id);
   const [editCijena,setEditCijena] = useState({});
+  const [editKat,setEditKat] = useState(null);
+  const [editKatNaziv,setEditKatNaziv] = useState("");
   const [odabraniUpit,setOdabraniUpit] = useState(null);
   const [korekcija,setKorekcija] = useState({});
   const [fazaOtvorena,setFazaOtvorena] = useState(null);
@@ -237,11 +282,10 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
   const [pretraga,setPretraga] = useState("");
   const [filterStatus,setFilterStatus] = useState("svi");
   const [poruka,setPoruka] = useState("");
-  const fazeKat = fazeKatProp;
-  const sacuvajFazeKat = (next) => { onFazeKatChange(next); flash("Sačuvano ✓"); };
-  const [profil,setProfilRaw] = useState(()=>{try{const s=localStorage.getItem("pp_profil");return s?JSON.parse(s):INIT_PROFIL;}catch{return INIT_PROFIL;}});
-  const setProfil = fn => setProfilRaw(prev=>{const next=typeof fn==="function"?fn(prev):fn;try{localStorage.setItem("pp_profil",JSON.stringify(next));}catch{}return next;});
   const flash = msg => { setPoruka(msg); setTimeout(()=>setPoruka(""),2500); };
+  const [profil,setProfilRaw] = useState(INIT_PROFIL);
+  useEffect(()=>{dbGet("profil",INIT_PROFIL).then(p=>setProfilRaw(p));},[]);
+  const setProfil = fn => setProfilRaw(prev=>{const next=typeof fn==="function"?fn(prev):fn;dbSet("profil",next);return next;});
 
   // Stats
   const stats = useMemo(()=>{
@@ -262,17 +306,15 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
     return matchStatus&&matchSearch;
   }),[upiti,pretraga,filterStatus]);
 
-  const sacuvajCijenu = (katId,stavkaId,nova) => {
-    setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:k.stavke.map(s=>s.id!==stavkaId?s:{...s,cijena:parseFloat(nova)||s.cijena})}));
+  const sacuvajCijenu = (katId,stavkaId,data) => {
+    setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:k.stavke.map(s=>s.id!==stavkaId?s:{...s,naziv:data.naziv??s.naziv,jm:data.jm??s.jm,cijena:parseFloat(data.cijena)||s.cijena})}));
     setEditCijena(prev=>{const n={...prev};delete n[`${katId}-${stavkaId}`];return n;});
-    flash("Cijena ažurirana ✓");
   };
   const obrisiStavku = (katId,stavkaId) => setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:k.stavke.filter(s=>s.id!==stavkaId)}));
   const dodajStavku = (katId) => {
     if(!novaStavka.naziv||!novaStavka.cijena)return;
     setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:[...k.stavke,{id:genId(),naziv:novaStavka.naziv,jm:novaStavka.jm,cijena:parseFloat(novaStavka.cijena)}]}));
     setNovaStavka({naziv:"",jm:"m²",cijena:""});
-    flash("Stavka dodana ✓");
   };
   const dodajKategoriju = () => {
     if(!novaKat.naziv)return;
@@ -333,6 +375,13 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
         <button style={tabS("faze")} onClick={()=>setTab("faze")}>🏗 Faze radova</button>
         <button style={tabS("profil")} onClick={()=>setTab("profil")}>⚙ Profil firme</button>
         <div style={{flex:1}}/>
+        {imaPromjena && (
+          <button onClick={sacuvajUSbazu} disabled={sprema}
+            style={{...btn("gold",{padding:"7px 16px",fontSize:12}),background:sprema?C.border:`linear-gradient(135deg, ${C.goldL}, ${C.gold})`,marginRight:8,display:"flex",alignItems:"center",gap:6}}>
+            {sprema ? "Čuvanje..." : "💾 Sačuvaj izmjene"}
+          </button>
+        )}
+        {imaPromjena && !sprema && <span style={{fontSize:11,color:C.goldL,marginRight:12,fontWeight:500}}>● Nesačuvane izmjene</span>}
         {poruka&&<span style={{fontSize:12,color:C.green,marginRight:12,fontWeight:500}}>{poruka}</span>}
       </div>
 
@@ -617,7 +666,21 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
               {kategorije.map(k=>(
                 <div key={k.id} onClick={()=>setAktKat(k.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktKat===k.id?C.bg:C.bg3,borderLeft:aktKat===k.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"pointer",transition:"all 0.1s"}}>
                   <span style={{fontSize:18}}>{k.ikona}</span>
-                  <span style={{fontSize:13,color:aktKat===k.id?C.text:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.naziv}</span>
+                  {editKat===k.id ? (
+                    <input autoFocus value={editKatNaziv}
+                      onChange={e=>setEditKatNaziv(e.target.value)}
+                      onKeyDown={e=>{
+                        if(e.key==="Enter"){setKategorije(p=>p.map(x=>x.id!==k.id?x:{...x,naziv:editKatNaziv}));setEditKat(null);flash("Kategorija ažurirana ✓");}
+                        if(e.key==="Escape")setEditKat(null);
+                      }}
+                      onClick={e=>e.stopPropagation()}
+                      style={{flex:1,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:5,padding:"3px 7px",fontSize:12,fontFamily:C.font,outline:"none",minWidth:0,color:C.text}}/>
+                  ) : (
+                    <>
+                      <span style={{fontSize:13,color:aktKat===k.id?C.text:C.muted,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.naziv}</span>
+                      <button onClick={e=>{e.stopPropagation();setEditKat(k.id);setEditKatNaziv(k.naziv);}} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:11,padding:"0 2px",opacity:0.6}}>✏</button>
+                    </>
+                  )}
                   <button onClick={e=>{e.stopPropagation();if(window.confirm("Obrisati kategoriju?"))setKategorije(p=>p.filter(x=>x.id!==k.id));}} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:14,padding:0}}>✕</button>
                 </div>
               ))}
@@ -636,7 +699,24 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
               <div key={kat.id}>
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem"}}>
                   <span style={{fontSize:28}}>{kat.ikona}</span>
-                  <h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:"0 0 2px"}}>{kat.naziv}</h2>
+                  {editKat===kat.id ? (
+                    <>
+                      <input autoFocus value={editKatNaziv}
+                        onChange={e=>setEditKatNaziv(e.target.value)}
+                        onKeyDown={e=>{
+                          if(e.key==="Enter"){setKategorije(p=>p.map(x=>x.id!==kat.id?x:{...x,naziv:editKatNaziv}));setEditKat(null);flash("Kategorija ažurirana ✓");}
+                          if(e.key==="Escape")setEditKat(null);
+                        }}
+                        style={{fontFamily:C.font,fontSize:20,fontWeight:700,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:8,padding:"5px 12px",outline:"none",color:C.text,minWidth:200}}/>
+                      <button onClick={()=>{setKategorije(p=>p.map(x=>x.id!==kat.id?x:{...x,naziv:editKatNaziv}));setEditKat(null);flash("Kategorija ažurirana ✓");}} style={{...btn("green",{padding:"5px 12px",borderRadius:7,fontSize:13})}}>✓</button>
+                      <button onClick={()=>setEditKat(null)} style={{...btn("ghost",{padding:"5px 10px",borderRadius:7,fontSize:13})}}>✕</button>
+                    </>
+                  ) : (
+                    <>
+                      <h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:"0 0 2px"}}>{kat.naziv}</h2>
+                      <button onClick={()=>{setEditKat(kat.id);setEditKatNaziv(kat.naziv);}} style={{...btn("ghost",{padding:"4px 10px",borderRadius:6,fontSize:12})}}>✏</button>
+                    </>
+                  )}
                   <span style={{...pill("blue")}}>{kat.stavke.length} stavki</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.5rem"}}>
@@ -649,15 +729,32 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
                           <p style={{margin:0,fontSize:13,color:C.dim}}>JM: {s.jm}</p>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                          {em?(<>
-                            <input autoFocus type="number" value={editCijena[key]} onChange={e=>setEditCijena(p=>({...p,[key]:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter")sacuvajCijenu(kat.id,s.id,editCijena[key]);if(e.key==="Escape")setEditCijena(p=>{const n={...p};delete n[key];return n;});}} style={{width:80,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",color:C.gold,fontSize:13,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
-                            <button onClick={()=>sacuvajCijenu(kat.id,s.id,editCijena[key])} style={btn("green",{padding:"5px 10px",borderRadius:6})}>✓</button>
-                            <button onClick={()=>setEditCijena(p=>{const n={...p};delete n[key];return n;})} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✕</button>
-                          </>):(<>
-                            <span style={{fontSize:14,fontWeight:700,color:C.gold,minWidth:80,textAlign:"right"}}>{fmtKM(s.cijena)}</span>
-                            <button onClick={()=>setEditCijena(p=>({...p,[key]:s.cijena}))} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✏</button>
-                            <button onClick={()=>obrisiStavku(kat.id,s.id)} style={btn("danger",{padding:"5px 10px",borderRadius:6})}>✕</button>
-                          </>)}
+                          {em?(
+                            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                              <input autoFocus value={editCijena[key]?.naziv??s.naziv}
+                                onChange={e=>setEditCijena(p=>({...p,[key]:{...p[key],naziv:e.target.value}}))}
+                                placeholder="Naziv"
+                                style={{width:180,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",fontSize:13,fontFamily:C.font,outline:"none", color: C.text}}/>
+                              <select value={editCijena[key]?.jm??s.jm}
+                                onChange={e=>setEditCijena(p=>({...p,[key]:{...p[key],jm:e.target.value}}))}
+                                style={{ background: "#fff", border: `1px solid ${C.gold}`, borderRadius: 6, padding: "5px 6px", fontSize: 13, fontFamily: C.font, outline: "none", color: C.text}}>
+                                {["m²","m³","m¹","kom","t","kg","h"].map(j=><option key={j}>{j}</option>)}
+                              </select>
+                              <input type="number" value={editCijena[key]?.cijena??s.cijena}
+                                onChange={e=>setEditCijena(p=>({...p,[key]:{...p[key],cijena:e.target.value}}))}
+                                placeholder="Cijena"
+                                onKeyDown={e=>{if(e.key==="Enter")sacuvajCijenu(kat.id,s.id,editCijena[key]);if(e.key==="Escape")setEditCijena(p=>{const n={...p};delete n[key];return n;});}}
+                                style={{width:80,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",color:C.gold,fontSize:13,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
+                              <button onClick={()=>sacuvajCijenu(kat.id,s.id,editCijena[key])} style={btn("green",{padding:"5px 10px",borderRadius:6})}>✓</button>
+                              <button onClick={()=>setEditCijena(p=>{const n={...p};delete n[key];return n;})} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✕</button>
+                            </div>
+                          ):(
+                            <>
+                              <span style={{fontSize:14,fontWeight:700,color:C.gold,minWidth:80,textAlign:"right"}}>{fmtKM(s.cijena)}</span>
+                              <button onClick={()=>setEditCijena(p=>({...p,[key]:{naziv:s.naziv,jm:s.jm,cijena:s.cijena}}))} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✏</button>
+                              <button onClick={()=>obrisiStavku(kat.id,s.id)} style={btn("danger",{padding:"5px 10px",borderRadius:6})}>✕</button>
+                            </>
+                          )}
                         </div>
                       </div>
                     );
@@ -763,7 +860,7 @@ function AdminPanel({kategorije,setKategorije,upiti,setUpiti,fazeKatProp,onFazeK
           <button onClick={()=>flash("Profil sačuvan ✓")} style={btn("gold",{padding:"11px 28px",fontSize:14})}>Sačuvaj izmjene</button>
           <p style={{fontSize:12,color:C.dim,marginTop:"2rem",paddingTop:"1.5rem",borderTop:`1px solid ${C.border}`}}>
             Podaci se čuvaju lokalno.{" "}
-            <span onClick={()=>{if(window.confirm("Resetovati SVE podatke?")){{localStorage.clear();window.location.reload();}}}} style={{color:C.gold,cursor:"pointer",textDecoration:"underline"}}>Resetuj na početne vrijednosti</span>
+            <span onClick={async()=>{if(window.confirm("Resetovati SVE podatke na početne vrijednosti?")){await Promise.all([dbSet("kategorije",INIT_KATEGORIJE),dbSet("faze_kat",INIT_FAZE_KAT),dbSet("profil",INIT_PROFIL)]);await supabase.from("upiti").delete().neq("id","x");window.location.reload();}}} style={{color:C.gold,cursor:"pointer",textDecoration:"underline"}}>Resetuj na početne vrijednosti</span>
           </p>
         </div>
       )}
@@ -832,10 +929,34 @@ const ChoiceBtn = ({label,aktivan,onClick,ikona}) => (
 export default function App() {
   const [view,setView] = useState("home");
   const [adminView,setAdminView] = useState(null);
-  const [kategorije,setKategorije] = usePersist("pp_kategorije",INIT_KATEGORIJE);
-  const [upiti,setUpiti] = usePersist("pp_upiti",INIT_UPITI);
-  const [aktivnaKat,setAktivnaKat] = useState(()=>{try{const s=localStorage.getItem("pp_kategorije");const k=s?JSON.parse(s):INIT_KATEGORIJE;return k[0]?.id||INIT_KATEGORIJE[0].id;}catch{return INIT_KATEGORIJE[0].id;}});
-  const [fazeKat,setFazeKatRaw] = useState(()=>{try{const s=localStorage.getItem("pp_faze_kat");return s?JSON.parse(s):INIT_FAZE_KAT;}catch{return INIT_FAZE_KAT;}});
+  const [kategorije,setKategorijeLoc] = useState(INIT_KATEGORIJE);
+  const [upiti,setUpitiLoc] = useState(INIT_UPITI);
+  const [fazeKat,setFazeKatLoc] = useState(INIT_FAZE_KAT);
+  const [loading,setLoading] = useState(true);
+  const [aktivnaKat,setAktivnaKat] = useState(INIT_KATEGORIJE[0].id);
+
+  useEffect(()=>{
+    async function load(){
+      setLoading(true);
+      const [kat,faze,upitiData]=await Promise.all([dbGet("kategorije",INIT_KATEGORIJE),dbGet("faze_kat",INIT_FAZE_KAT),upitiGet()]);
+      setKategorijeLoc(kat);setFazeKatLoc(faze);setUpitiLoc(upitiData);
+      setAktivnaKat(kat[0]?.id||INIT_KATEGORIJE[0].id);
+      setLoading(false);
+    }
+    load();
+  },[]);
+
+  // Syncs na Supabase — poziva se samo kad admin klikne Sačuvaj
+  const syncKategorije = async (val) => { setKategorijeLoc(val); await dbSet("kategorije",val); };
+
+  const setUpiti = (next) => setUpitiLoc(prev=>{
+    const r=typeof next==="function"?next(prev):next;
+    if(Array.isArray(r)&&Array.isArray(prev)){
+      r.filter(u=>!prev.find(p=>p.id===u.id)).forEach(u=>upitiUpsert(u));
+      r.filter(u=>{const o=prev.find(p=>p.id===u.id);return o&&JSON.stringify(o)!==JSON.stringify(u);}).forEach(u=>upitiUpdate(u));
+    }
+    return r;
+  });
   const [stavke,setStavke] = useState({});
   const [kontakt,setKontakt] = useState({ime:"",telefon:"",email:"",napomena:""});
   const [sidebar,setSidebar] = useState(true);
@@ -883,9 +1004,21 @@ export default function App() {
   };
 
   if(adminView==="login") return <AdminLogin onLogin={()=>setAdminView("panel")} onCancel={()=>setAdminView(null)}/>;
-  if(adminView==="panel") return <AdminPanel kategorije={kategorije} setKategorije={setKategorije} upiti={upiti} setUpiti={setUpiti} fazeKatProp={fazeKat} onFazeKatChange={next=>{setFazeKatRaw(next);try{localStorage.setItem("pp_faze_kat",JSON.stringify(next));}catch{}}} onBack={()=>setAdminView(null)}/>;
+  if(adminView==="panel") return <AdminPanel kategorije={kategorije} setKategorije={syncKategorije} upiti={upiti} setUpiti={setUpiti} fazeKatProp={fazeKat} onFazeKatChange={async next=>{setFazeKatLoc(next);await dbSet("faze_kat",next);}} onBack={()=>setAdminView(null)}/>;
 
   const GF = () => <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet"/>;
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:C.font,color:C.text}}>
+      <GF/>
+      <TitleBar/>
+      <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:16}}>
+        <div style={{width:40,height:40,border:`3px solid ${C.border}`,borderTop:`3px solid ${C.gold}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+        <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+        <p style={{fontSize:14,color:C.muted}}>Učitavanje podataka...</p>
+      </div>
+    </div>
+  );
 
   // ── HOME ──────────────────────────────────────────────────────────────────
   if(view==="home") return (
