@@ -1451,6 +1451,7 @@ export default function App() {
   const [kategorije,setKategorijeLoc] = useState(INIT_KATEGORIJE);
   const [upiti,setUpitiLoc] = useState([]);
   const [fazeKat,setFazeKatLoc] = useState(INIT_FAZE_KAT);
+  const [klijentskeFaze,setKlijentskeFaze] = useState(FAZE);
   const [loading,setLoading] = useState(true);
   const [aktivnaKat,setAktivnaKat] = useState(INIT_KATEGORIJE[0].id);
   const [showChangePass,setShowChangePass] = useState(false);
@@ -1464,12 +1465,14 @@ export default function App() {
         setFirma(currentFirma);
       }
       const fId = currentFirma?.id || null;
-      const [kat,faze,upitiData]=await Promise.all([
+      const [kat,faze,upitiData,fazeListData]=await Promise.all([
         dbGet("kategorije",INIT_KATEGORIJE,fId),
         dbGet("faze_kat",INIT_FAZE_KAT,fId),
         upitiGet(fId),
+        dbGet("faze_list",FAZE,fId),
       ]);
       setKategorijeLoc(kat);setFazeKatLoc(faze);setUpitiLoc(upitiData);
+      setKlijentskeFaze(fazeListData);
       setAktivnaKat(kat[0]?.id||INIT_KATEGORIJE[0].id);
       setLoading(false);
     }
@@ -1515,7 +1518,7 @@ export default function App() {
   const ukupno = Object.values(stavke).reduce((s,x)=>s+x.kolicina*x.cijena,0);
   const broJStavki = Object.values(stavke).filter(s=>s.kolicina>0).length;
   const aktivneStavke = Object.entries(stavke).filter(([,s])=>s.kolicina>0);
-  const ukupnoFaze = FAZE.filter(f=>odabraneFaze.includes(f.id)).reduce((s,f)=>s+f.cijena,0);
+  const ukupnoFaze = klijentskeFaze.filter(f=>odabraneFaze.includes(f.id)).reduce((s,f)=>s+f.cijena,0);
   const odabraneStavkeFaze = odabraneFaze.flatMap(fId2=>(fazeKat[fId2]||[]).map(s=>({...s,kolicina:fazeStavke[s.id]||0,iznos:(fazeStavke[s.id]||0)*s.cijena})));
 
   const setKolicina = (id,cijena,naziv,jm,val) => setStavke(prev=>({...prev,[id]:{kolicina:parseFloat(val)||0,cijena,naziv,jm}}));
@@ -1621,7 +1624,7 @@ export default function App() {
         <h2 style={{fontFamily:C.font,fontSize:28,fontWeight:700,margin:"0 0 0.25rem"}}>Okvirne cijene po fazama</h2>
         <p style={{fontSize:13,color:C.muted,margin:"0 0 1.75rem",lineHeight:1.6}}>Odaberite faze koje vas zanimaju. Cijene su okvirne za ~100m².</p>
         <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:"1.5rem"}}>
-          {FAZE.map(f=>{
+          {klijentskeFaze.map(f=>{
             const od=odabraneFaze.includes(f.id);
             return (
               <div key={f.id} onClick={()=>setOdabraneFaze(prev=>od?prev.filter(x=>x!==f.id):[...prev,f.id])}
@@ -1673,7 +1676,7 @@ export default function App() {
           {/* Sidebar faze */}
           <div style={{width:200,flexShrink:0,background:C.bg3,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column"}}>
             <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`}}><p style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",margin:0}}>Vaše faze</p></div>
-            {FAZE.filter(f=>odabraneFaze.includes(f.id)).map(f=>(
+            {klijentskeFaze.filter(f=>odabraneFaze.includes(f.id)).map(f=>(
               <button key={f.id} onClick={()=>setAktivnaFaza(f.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktivnaFaza===f.id?C.bg:C.bg3,border:"none",borderLeft:aktivnaFaza===f.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"pointer",fontFamily:C.font,textAlign:"left",width:"100%"}}>
                 <span style={{fontSize:18}}>{f.ikona}</span>
                 <span style={{fontSize:13,color:aktivnaFaza===f.id?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.naziv.split("—")[0].trim()}</span>
@@ -1684,7 +1687,7 @@ export default function App() {
           {/* Stavke */}
           <div style={{flex:1,overflow:"auto",padding:"1.5rem"}}>
             <button onClick={nazad} style={{background:"transparent",border:"none",color:C.muted,cursor:"pointer",fontFamily:C.font,fontSize:13,padding:"0 0 1rem",display:"block"}}>← Nazad</button>
-            {FAZE.filter(f=>f.id===aktivnaFaza).map(f=>(
+            {klijentskeFaze.filter(f=>f.id===aktivnaFaza).map(f=>(
               <div key={f.id}>
                 <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem"}}>
                   <span style={{fontSize:28}}>{f.ikona}</span>
