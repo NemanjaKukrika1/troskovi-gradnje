@@ -900,6 +900,10 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.5rem"}}>
                   {stavke.map(s=>{
                     const em=editFazaCijena[s.id]!==undefined;
+                    const sačuvaj = () => {
+                      sacuvajFazeKat({...fazeKat,[aktivnaAdminFaza]:stavke.map(x=>x.id!==s.id?x:{...x,naziv:editFazaCijena[s.id]?.naziv??s.naziv,opis:editFazaCijena[s.id]?.opis??s.opis,jm:editFazaCijena[s.id]?.jm??s.jm,cijena:parseFloat(editFazaCijena[s.id]?.cijena)||s.cijena})});
+                      setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});
+                    };
                     return (
                       <div key={s.id} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
                         <div style={{flex:1,minWidth:0}}>
@@ -908,13 +912,32 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                           <p style={{margin:0,fontSize:13,color:C.dim}}>JM: {s.jm}</p>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                          {em?(<>
-                            <input autoFocus type="number" value={editFazaCijena[s.id]} onChange={e=>setEditFazaCijena(p=>({...p,[s.id]:e.target.value}))} onKeyDown={e=>{if(e.key==="Enter"){sacuvajFazeKat({...fazeKat,[aktivnaAdminFaza]:stavke.map(x=>x.id!==s.id?x:{...x,cijena:parseFloat(editFazaCijena[s.id])||x.cijena})});setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});}if(e.key==="Escape")setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});}} style={{width:80,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",color:C.gold,fontSize:13,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
-                            <button onClick={()=>{sacuvajFazeKat({...fazeKat,[aktivnaAdminFaza]:stavke.map(x=>x.id!==s.id?x:{...x,cijena:parseFloat(editFazaCijena[s.id])||x.cijena})});setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});}} style={btn("green",{padding:"5px 10px",borderRadius:6})}>✓</button>
-                            <button onClick={()=>setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;})} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✕</button>
-                          </>):(<>
+                          {em ? (
+                            <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                              <input value={editFazaCijena[s.id]?.naziv??s.naziv}
+                                onChange={e=>setEditFazaCijena(p=>({...p,[s.id]:{...p[s.id],naziv:e.target.value}}))}
+                                placeholder="Naziv"
+                                style={{width:160,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",fontSize:13,fontFamily:C.font,outline:"none",color:C.text}}/>
+                              <input value={editFazaCijena[s.id]?.opis??s.opis}
+                                onChange={e=>setEditFazaCijena(p=>({...p,[s.id]:{...p[s.id],opis:e.target.value}}))}
+                                placeholder="Kratki opis"
+                                style={{width:140,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",fontSize:13,fontFamily:C.font,outline:"none",color:C.text}}/>
+                              <select value={editFazaCijena[s.id]?.jm??s.jm}
+                                onChange={e=>setEditFazaCijena(p=>({...p,[s.id]:{...p[s.id],jm:e.target.value}}))}
+                                style={{background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 6px",fontSize:13,fontFamily:C.font,outline:"none",color:C.text}}>
+                                {["m²","m³","m¹","kom","t","kg","h"].map(j=><option key={j}>{j}</option>)}
+                              </select>
+                              <input type="number" value={editFazaCijena[s.id]?.cijena??s.cijena}
+                                onChange={e=>setEditFazaCijena(p=>({...p,[s.id]:{...p[s.id],cijena:e.target.value}}))}
+                                onKeyDown={e=>{if(e.key==="Enter")sačuvaj();if(e.key==="Escape")setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});}}
+                                placeholder="Cijena"
+                                style={{width:80,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:6,padding:"5px 8px",color:C.gold,fontSize:13,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
+                              <button onClick={sačuvaj} style={btn("green",{padding:"5px 10px",borderRadius:6})}>✓</button>
+                              <button onClick={()=>setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;})} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✕</button>
+                            </div>
+                          ) : (<>
                             <span style={{fontSize:14,fontWeight:700,color:C.gold,minWidth:80,textAlign:"right"}}>{fmtKM(s.cijena)}</span>
-                            <button onClick={()=>setEditFazaCijena(p=>({...p,[s.id]:s.cijena}))} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✏</button>
+                            <button onClick={()=>setEditFazaCijena(p=>({...p,[s.id]:{naziv:s.naziv,opis:s.opis,jm:s.jm,cijena:s.cijena}}))} style={btn("ghost",{padding:"5px 10px",borderRadius:6})}>✏</button>
                             <button onClick={()=>sacuvajFazeKat({...fazeKat,[aktivnaAdminFaza]:stavke.filter(x=>x.id!==s.id)})} style={btn("danger",{padding:"5px 10px",borderRadius:6})}>✕</button>
                           </>)}
                         </div>
