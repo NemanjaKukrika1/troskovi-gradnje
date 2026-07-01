@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "./supabase";
 
 // ─── DIZAJN SISTEM ───────────────────────────────────────────────────────────
@@ -377,10 +377,40 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
   const [pretraga,setPretraga] = useState("");
   const [filterStatus,setFilterStatus] = useState("svi");
   const [poruka,setPoruka] = useState("");
+  const [dragOver,setDragOver] = useState(null);
+  const dragSrc = React.useRef(null);
   const flash = msg => { setPoruka(msg); setTimeout(()=>setPoruka(""),2500); };
   const [profil,setProfilRaw] = useState(INIT_PROFIL);
   useEffect(()=>{dbGet("profil",INIT_PROFIL,firmaId).then(p=>setProfilRaw(p));},[]);
   const setProfil = fn => setProfilRaw(prev=>{const next=typeof fn==="function"?fn(prev):fn;dbSet("profil",next,firmaId);return next;});
+
+  // Drag helpers
+  const reorder = (arr, fromId, toId) => {
+    const from = arr.findIndex(x=>x.id===fromId);
+    const to = arr.findIndex(x=>x.id===toId);
+    if(from===-1||to===-1||from===to) return arr;
+    const r=[...arr];
+    const [item]=r.splice(from,1);
+    r.splice(to,0,item);
+    return r;
+  };
+  const dragProps = (stavkaId, katId, isFaza=false) => ({
+    draggable: true,
+    onDragStart: ()=>{ dragSrc.current={stavkaId,katId,isFaza}; },
+    onDragOver: e=>{ e.preventDefault(); setDragOver(stavkaId); },
+    onDragLeave: ()=>setDragOver(null),
+    onDrop: e=>{ e.preventDefault(); setDragOver(null);
+      const src=dragSrc.current;
+      if(!src||src.stavkaId===stavkaId) return;
+      if(isFaza) {
+        setFazeKatLok(prev=>{const next={...prev,[katId]:reorder(prev[katId]||[],src.stavkaId,stavkaId)};setFazePromjene(true);return next;});
+      } else {
+        setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:reorder(k.stavke,src.stavkaId,stavkaId)}));
+      }
+      dragSrc.current=null;
+    },
+    onDragEnd: ()=>{ setDragOver(null); dragSrc.current=null; },
+  });
 
   // Stats
   const stats = useMemo(()=>{
@@ -820,7 +850,8 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                   {kat.stavke.map(s=>{
                     const key=`${kat.id}-${s.id}`;const em=editCijena[key]!==undefined;
                     return (
-                      <div key={s.id} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                      <div key={s.id} {...dragProps(s.id,kat.id)} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
+                        <span style={{color:C.dim,fontSize:16,flexShrink:0,cursor:"grab"}}>⠿</span>
                         <div style={{flex:1,minWidth:0}}>
                           <p style={{margin:"0 0 2px",fontSize:13,color:C.text}}>{s.naziv}</p>
                           <p style={{margin:0,fontSize:13,color:C.dim}}>JM: {s.jm}</p>
@@ -905,7 +936,8 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                       setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});
                     };
                     return (
-                      <div key={s.id} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12}}>
+                      <div key={s.id} {...dragProps(s.id,aktivnaAdminFaza,true)} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
+                        <span style={{color:C.dim,fontSize:16,flexShrink:0,cursor:"grab"}}>⠿</span>
                         <div style={{flex:1,minWidth:0}}>
                           <p style={{margin:"0 0 2px",fontSize:13,color:C.text}}>{s.naziv}</p>
                           <p style={{margin:"0 0 2px",fontSize:12,color:C.dim,fontStyle:"italic"}}>{s.opis}</p>
