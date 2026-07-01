@@ -142,17 +142,96 @@ const genId = () => Math.random().toString(36).slice(2,9);
 
 // ─── SUPABASE ────────────────────────────────────────────────────────────────
 
-async function dbGet(key, fallback) {
-  try { const {data,error}=await supabase.from('settings').select('data').eq('key',key).single(); if(error||!data)return fallback; return data.data; } catch { return fallback; }
+// Auth
+async function login(username, password) {
+  try {
+    const {data,error} = await supabase.from('korisnici').select('*').eq('username',username).eq('password_hash',password).single();
+    if(error||!data) return null;
+    return data;
+  } catch { return null; }
 }
-async function dbSet(key, value) {
-  try { await supabase.from('settings').upsert({key,data:value,updated_at:new Date().toISOString()}); } catch(e){console.error(e);}
+async function getFirma(firmaId) {
+  try {
+    const {data} = await supabase.from('firme').select('*').eq('id',firmaId).single();
+    return data;
+  } catch { return null; }
 }
-async function upitiGet() {
-  try { const {data,error}=await supabase.from('upiti').select('*').order('created_at',{ascending:false}); if(error||!data)return INIT_UPITI; return data.map(r=>r.data); } catch { return INIT_UPITI; }
+async function getFirmaBySlug(slug) {
+  try {
+    const {data} = await supabase.from('firme').select('*').eq('slug',slug).single();
+    return data;
+  } catch { return null; }
 }
-async function upitiUpsert(upit) {
-  try { await supabase.from('upiti').upsert({id:upit.id,data:upit,created_at:new Date().toISOString()}); } catch(e){console.error(e);}
+async function getAllFirme() {
+  try {
+    const {data} = await supabase.from('firme').select('*').order('naziv');
+    return data||[];
+  } catch { return []; }
+}
+async function getAllKorisnici() {
+  try {
+    const {data} = await supabase.from('korisnici').select('id,username,uloga,firma_id,created_at').order('created_at');
+    return data||[];
+  } catch { return []; }
+}
+async function updatePassword(korisnikId, newPassword) {
+  try {
+    await supabase.from('korisnici').update({password_hash:newPassword}).eq('id',korisnikId);
+    return true;
+  } catch { return false; }
+}
+async function dodajFirmu(naziv, slug) {
+  try {
+    const {data} = await supabase.from('firme').insert({id:genId(),naziv,slug}).select().single();
+    return data;
+  } catch { return null; }
+}
+async function dodajKorisnika(firmaId, username, password) {
+  try {
+    const {data} = await supabase.from('korisnici').insert({id:genId(),firma_id:firmaId,username,password_hash:password,uloga:'admin'}).select().single();
+    return data;
+  } catch { return null; }
+}
+async function obrisiKorisnika(id) {
+  try { await supabase.from('korisnici').delete().eq('id',id); return true; } catch { return false; }
+}
+async function obrisiFiremu(id) {
+  try { await supabase.from('firme').delete().eq('id',id); return true; } catch { return false; }
+}
+
+// Settings per firma
+async function dbGet(key, fallback, firmaId=null) {
+  try {
+    let q = supabase.from('settings').select('data').eq('key',key);
+    if(firmaId) q = q.eq('firma_id',firmaId); else q = q.is('firma_id',null);
+    const {data,error} = await q.single();
+    if(error||!data) return fallback; return data.data;
+  } catch { return fallback; }
+}
+async function dbSet(key, value, firmaId=null) {
+  try {
+    const rec = {key,data:value,updated_at:new Date().toISOString()};
+    if(firmaId) rec.firma_id=firmaId; else rec.firma_id=null;
+    await supabase.from('settings').upsert(rec,{onConflict:'key,firma_id'});
+  } catch(e){console.error(e);}
+}
+
+// Upiti per firma
+async function upitiGet(firmaId=null) {
+  try {
+    let q = supabase.from('upiti').select('*').order('created_at',{ascending:false});
+    if(firmaId) q = q.eq('firma_id',firmaId);
+    const {data,error} = await q;
+    if(error||!data) return [];
+    return data.map(r=>({...r.data,_firma_id:r.firma_id}));
+  } catch { return []; }
+}
+async function upitiUpsert(upit, firmaId=null) {
+  try {
+    const rec = {id:upit.id,data:upit,created_at:new Date().toISOString()};
+    if(firmaId) rec.firma_id=firmaId;
+    await supabase.from('upiti').upsert(rec);
+  } catch(e){console.error(e);}
 }
 async function upitiUpdate(upit) {
   try { await supabase.from('upiti').update({data:upit}).eq('id',upit.id); } catch(e){console.error(e);}
@@ -207,23 +286,40 @@ const Sekcija = ({label,children,required}) => (
 );
 
 // ─── ADMIN LOGIN ──────────────────────────────────────────────────────────────
-function AdminLogin({onLogin,onCancel}) {
-  const [pass,setPass] = useState(""); const [err,setErr] = useState(false);
-  const submit = () => pass===ADMIN_PASS?onLogin():(setErr(true),setPass(""));
+function AdminLogin({onLogin,onCancel,firmaSlug}) {
+  const [username,setUsername] = useState("");
+  const [pass,setPass] = useState("");
+  const [err,setErr] = useState("");
+  const [loading,setLoading] = useState(false);
+
+  const submit = async () => {
+    if(!username||!pass)return;
+    setLoading(true);setErr("");
+    const korisnik = await login(username, pass);
+    if(!korisnik){setErr("Pogrešno korisničko ime ili lozinka.");setLoading(false);return;}
+    if(korisnik.uloga==="admin" && firmaSlug) {
+      const firma = await getFirma(korisnik.firma_id);
+      if(!firma||firma.slug!==firmaSlug){setErr("Nemate pristup ovoj firmi.");setLoading(false);return;}
+    }
+    setLoading(false);
+    onLogin(korisnik);
+  };
+
   return (
     <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:C.font,color:C.text}}>
       <GFont/>
       <TitleBar onBack={onCancel}/>
       <div style={{flex:1,display:"flex",alignItems:"center",justifyContent:"center"}}>
-        <div style={{...card(),padding:"2rem 2.5rem",width:340}}>
+        <div style={{...card(),padding:"2rem 2.5rem",width:360}}>
           <div style={{textAlign:"center",marginBottom:"1.75rem"}}>
             <div style={{width:52,height:52,background:C.goldBg,border:`1px solid ${C.goldL}`,borderRadius:14,display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 1rem",fontSize:24}}>🔐</div>
             <h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:"0 0 4px"}}>Admin panel</h2>
-            <p style={{fontSize:13,color:C.dim,margin:0}}>Unesite lozinku za pristup</p>
+            <p style={{fontSize:13,color:C.dim,margin:0}}>{firmaSlug?`Firma: ${firmaSlug}`:"Prijava"}</p>
           </div>
-          <input type="password" placeholder="Lozinka" value={pass} onChange={e=>{setPass(e.target.value);setErr(false);}} onKeyDown={e=>e.key==="Enter"&&submit()} style={{...inp(),border:`1px solid ${err?C.red:C.border2}`,marginBottom:8}}/>
-          {err&&<p style={{fontSize:12,color:C.red,margin:"0 0 8px"}}>Pogrešna lozinka. (Hint: admin123)</p>}
-          <button onClick={submit} style={{...btn("gold"),width:"100%",padding:"11px",fontSize:14}}>Prijavi se</button>
+          <input placeholder="Korisničko ime" value={username} onChange={e=>{setUsername(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()} style={{...inp(),marginBottom:10}}/>
+          <input type="password" placeholder="Lozinka" value={pass} onChange={e=>{setPass(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()} style={{...inp(),border:`1px solid ${err?C.red:C.border2}`,marginBottom:8}}/>
+          {err&&<p style={{fontSize:12,color:C.red,margin:"0 0 8px"}}>{err}</p>}
+          <button onClick={submit} disabled={loading} style={{...btn("gold"),width:"100%",padding:"11px",fontSize:14}}>{loading?"Provjera...":"Prijavi se"}</button>
           <button onClick={onCancel} style={{...btn("ghost"),width:"100%",border:"none",marginTop:6,fontSize:13}}>Odustani</button>
         </div>
       </div>
@@ -232,7 +328,7 @@ function AdminLogin({onLogin,onCancel}) {
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────────────────────────────
-function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUpiti,fazeKatProp,onFazeKatChange,onBack}) {
+function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUpiti,fazeKatProp,onFazeKatChange,firmaId,korisnik,onBack,onLogout,onChangePass}) {
   const [tab,setTab] = useState("dashboard");
   // Lokalni state — ne šalje u bazu dok ne klikneš Sačuvaj
   const [kategorije,setKategorijeLok] = useState(katInit);
@@ -254,7 +350,6 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
     setFazePromjene(true);
   };
 
-  // Sačuvaj sve u bazu
   const sacuvajUSbazu = async () => {
     setSprema(true);
     if (katPromjene) { await syncKategorije(kategorije); setKatPromjene(false); }
@@ -284,8 +379,8 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
   const [poruka,setPoruka] = useState("");
   const flash = msg => { setPoruka(msg); setTimeout(()=>setPoruka(""),2500); };
   const [profil,setProfilRaw] = useState(INIT_PROFIL);
-  useEffect(()=>{dbGet("profil",INIT_PROFIL).then(p=>setProfilRaw(p));},[]);
-  const setProfil = fn => setProfilRaw(prev=>{const next=typeof fn==="function"?fn(prev):fn;dbSet("profil",next);return next;});
+  useEffect(()=>{dbGet("profil",INIT_PROFIL,firmaId).then(p=>setProfilRaw(p));},[]);
+  const setProfil = fn => setProfilRaw(prev=>{const next=typeof fn==="function"?fn(prev):fn;dbSet("profil",next,firmaId);return next;});
 
   // Stats
   const stats = useMemo(()=>{
@@ -381,8 +476,10 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
             {sprema ? "Čuvanje..." : "💾 Sačuvaj izmjene"}
           </button>
         )}
-        {imaPromjena && !sprema && <span style={{fontSize:11,color:C.goldL,marginRight:12,fontWeight:500}}>● Nesačuvane izmjene</span>}
-        {poruka&&<span style={{fontSize:12,color:C.green,marginRight:12,fontWeight:500}}>{poruka}</span>}
+        {imaPromjena && !sprema && <span style={{fontSize:11,color:C.goldL,marginRight:8,fontWeight:500}}>● Nesačuvane izmjene</span>}
+        {poruka&&<span style={{fontSize:12,color:C.green,marginRight:8,fontWeight:500}}>{poruka}</span>}
+        {onChangePass&&<button onClick={onChangePass} style={btn("ghost",{fontSize:11,padding:"5px 10px",marginRight:4})}>🔑 Lozinka</button>}
+        {onLogout&&<button onClick={onLogout} style={btn("ghost",{fontSize:11,padding:"5px 10px"})}>Odjavi se</button>}
       </div>
 
       {/* ── DASHBOARD ── */}
@@ -925,20 +1022,294 @@ const ChoiceBtn = ({label,aktivan,onClick,ikona}) => (
   </button>
 );
 
-// ─── GLAVNA APLIKACIJA ────────────────────────────────────────────────────────
-export default function App() {
-  const [view,setView] = useState("home");
-  const [adminView,setAdminView] = useState(null);
-  const [kategorije,setKategorijeLoc] = useState(INIT_KATEGORIJE);
-  const [upiti,setUpitiLoc] = useState(INIT_UPITI);
-  const [fazeKat,setFazeKatLoc] = useState(INIT_FAZE_KAT);
+// ─── PROMJENA LOZINKE ────────────────────────────────────────────────────────
+function PromijeniLozinku({korisnikId,onClose}) {
+  const [stara,setStara] = useState("");
+  const [nova,setNova] = useState("");
+  const [potvrda,setPotvrda] = useState("");
+  const [err,setErr] = useState("");
+  const [ok,setOk] = useState(false);
+  const [loading,setLoading] = useState(false);
+
+  const submit = async () => {
+    if(nova.length<6){setErr("Nova lozinka mora imati najmanje 6 znakova.");return;}
+    if(nova!==potvrda){setErr("Lozinke se ne podudaraju.");return;}
+    setLoading(true);setErr("");
+    const res = await updatePassword(korisnikId,nova);
+    setLoading(false);
+    if(res){setOk(true);setTimeout(onClose,1500);}
+    else setErr("Greška pri promjeni lozinke.");
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(28,26,22,0.5)",zIndex:2000,display:"flex",alignItems:"center",justifyContent:"center",padding:"1rem"}}>
+      <div style={{...card(),padding:"2rem",width:360,boxShadow:C.shadowL}}>
+        <h3 style={{fontFamily:C.font,fontSize:18,fontWeight:700,margin:"0 0 1.25rem"}}>Promjena lozinke</h3>
+        {ok ? (
+          <p style={{color:C.green,fontWeight:600,textAlign:"center",padding:"1rem 0"}}>✓ Lozinka uspješno promijenjena!</p>
+        ) : (<>
+          <div style={{marginBottom:10}}>
+            <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:4}}>Nova lozinka</label>
+            <input type="password" value={nova} onChange={e=>{setNova(e.target.value);setErr("");}} style={inp({background:C.bg3})}/>
+          </div>
+          <div style={{marginBottom:12}}>
+            <label style={{fontSize:12,color:C.muted,display:"block",marginBottom:4}}>Potvrdi novu lozinku</label>
+            <input type="password" value={potvrda} onChange={e=>{setPotvrda(e.target.value);setErr("");}} onKeyDown={e=>e.key==="Enter"&&submit()} style={{...inp({background:C.bg3}),borderColor:potvrda&&nova!==potvrda?C.red:undefined}}/>
+          </div>
+          {err&&<p style={{fontSize:12,color:C.red,margin:"0 0 10px"}}>{err}</p>}
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={submit} disabled={loading} style={{...btn("gold",{flex:1,padding:"10px"})}}>
+              {loading?"Čuvanje...":"Sačuvaj"}
+            </button>
+            <button onClick={onClose} style={btn("ghost",{padding:"10px 16px"})}>Odustani</button>
+          </div>
+        </>)}
+      </div>
+    </div>
+  );
+}
+
+// ─── SUPER ADMIN PANEL ───────────────────────────────────────────────────────
+function SuperAdminPanel({onLogout}) {
+  const [tab,setTab] = useState("firme");
+  const [firme,setFirme] = useState([]);
+  const [korisnici,setKorisnici] = useState([]);
+  const [sviUpiti,setSviUpiti] = useState([]);
   const [loading,setLoading] = useState(true);
-  const [aktivnaKat,setAktivnaKat] = useState(INIT_KATEGORIJE[0].id);
+  const [novaFirma,setNovaFirma] = useState({naziv:"",slug:""});
+  const [noviKorisnik,setNoviKorisnik] = useState({firmaId:"",username:"",password:""});
+  const [poruka,setPoruka] = useState("");
+  const [editPassKorisnik,setEditPassKorisnik] = useState(null);
+  const [novaLozinka,setNovaLozinka] = useState({});
+  const [filterFirma,setFilterFirma] = useState("sve");
+
+  const flash = msg => {setPoruka(msg);setTimeout(()=>setPoruka(""),2500);};
 
   useEffect(()=>{
     async function load(){
       setLoading(true);
-      const [kat,faze,upitiData]=await Promise.all([dbGet("kategorije",INIT_KATEGORIJE),dbGet("faze_kat",INIT_FAZE_KAT),upitiGet()]);
+      const [f,k,u]=await Promise.all([getAllFirme(),getAllKorisnici(),upitiGet()]);
+      setFirme(f);setKorisnici(k);setSviUpiti(u);setLoading(false);
+    }
+    load();
+  },[]);
+
+  const handleDodajFirmu = async () => {
+    if(!novaFirma.naziv||!novaFirma.slug){flash("Popunite naziv i slug!");return;}
+    const f = await dodajFirmu(novaFirma.naziv, novaFirma.slug.toLowerCase().replace(/\s+/g,"-"));
+    if(f){setFirme(p=>[...p,f]);setNovaFirma({naziv:"",slug:""});flash("Firma dodana ✓");}
+    else flash("Greška — slug možda već postoji.");
+  };
+
+  const handleDodajKorisnika = async () => {
+    if(!noviKorisnik.firmaId||!noviKorisnik.username||!noviKorisnik.password){flash("Popunite sva polja!");return;}
+    const k = await dodajKorisnika(noviKorisnik.firmaId,noviKorisnik.username,noviKorisnik.password);
+    if(k){setKorisnici(p=>[...p,k]);setNoviKorisnik({firmaId:"",username:"",password:""});flash("Korisnik dodan ✓");}
+    else flash("Greška — korisničko ime možda već postoji.");
+  };
+
+  const handleObrisiKorisnika = async (id) => {
+    if(!window.confirm("Obrisati korisnika?"))return;
+    if(await obrisiKorisnika(id)){setKorisnici(p=>p.filter(k=>k.id!==id));flash("Korisnik obrisan ✓");}
+  };
+
+  const handleObrisiFiremu = async (id) => {
+    if(!window.confirm("Obrisati firmu i sve njene podatke?"))return;
+    if(await obrisiFiremu(id)){setFirme(p=>p.filter(f=>f.id!==id));setKorisnici(p=>p.filter(k=>k.firma_id!==id));flash("Firma obrisana ✓");}
+  };
+
+  const handlePromijeniPass = async (korisnikId) => {
+    const nova = novaLozinka[korisnikId];
+    if(!nova||nova.length<6){flash("Lozinka mora imati min. 6 znakova.");return;}
+    if(await updatePassword(korisnikId,nova)){
+      setNovaLozinka(p=>({...p,[korisnikId]:""}));
+      setEditPassKorisnik(null);
+      flash("Lozinka promijenjena ✓");
+    }
+  };
+
+  const tabS = t => ({background:"transparent",border:"none",borderBottom:tab===t?`2px solid ${C.gold}`:"2px solid transparent",color:tab===t?C.text:C.dim,fontSize:13,fontWeight:tab===t?600:400,padding:"10px 16px",cursor:"pointer",fontFamily:C.font,marginBottom:-1});
+
+  const filtrirani = filterFirma==="sve"?sviUpiti:sviUpiti.filter(u=>u._firma_id===filterFirma);
+
+  if(loading) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:C.font}}>
+      <GFont/>
+      <p style={{color:C.muted}}>Učitavanje...</p>
+    </div>
+  );
+
+  return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",flexDirection:"column",fontFamily:C.font,color:C.text}}>
+      <GFont/>
+      <div style={{height:36,background:C.bg3,display:"flex",alignItems:"center",justifyContent:"space-between",padding:"0 16px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+        <span style={{fontSize:14,color:C.text,fontWeight:700}}>🛡 Super Admin</span>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          {poruka&&<span style={{fontSize:12,color:C.green,fontWeight:500}}>{poruka}</span>}
+          <button onClick={onLogout} style={btn("ghost",{fontSize:12,padding:"5px 12px"})}>Odjavi se</button>
+        </div>
+      </div>
+
+      <div style={{display:"flex",alignItems:"center",background:C.bg3,padding:"0 16px",borderBottom:`1px solid ${C.border}`,flexShrink:0}}>
+        <button style={tabS("firme")} onClick={()=>setTab("firme")}>🏢 Firme ({firme.length})</button>
+        <button style={tabS("korisnici")} onClick={()=>setTab("korisnici")}>👤 Korisnici ({korisnici.filter(k=>k.uloga!=="superadmin").length})</button>
+        <button style={tabS("upiti")} onClick={()=>setTab("upiti")}>📋 Svi upiti ({sviUpiti.length})</button>
+      </div>
+
+      {/* ── FIRME ── */}
+      {tab==="firme"&&(
+        <div style={{flex:1,overflow:"auto",padding:"1.5rem",maxWidth:800,width:"100%",margin:"0 auto"}}>
+          <h2 style={{fontFamily:C.font,fontSize:20,fontWeight:700,margin:"0 0 1.25rem"}}>Firme</h2>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:"2rem"}}>
+            {firme.map(f=>(
+              <div key={f.id} style={{...card(),padding:"14px 18px",display:"flex",alignItems:"center",gap:12}}>
+                <div style={{flex:1}}>
+                  <p style={{margin:"0 0 2px",fontSize:14,fontWeight:600}}>{f.naziv}</p>
+                  <p style={{margin:0,fontSize:12,color:C.muted}}>/{f.slug} · {korisnici.filter(k=>k.firma_id===f.id).length} korisnika</p>
+                </div>
+                <a href={`/${f.slug}`} target="_blank" rel="noreferrer" style={{...btn("ghost",{fontSize:12,padding:"5px 12px"}),textDecoration:"none"}}>Otvori →</a>
+                <button onClick={()=>handleObrisiFiremu(f.id)} style={btn("danger",{fontSize:12,padding:"5px 12px"})}>Obriši</button>
+              </div>
+            ))}
+          </div>
+
+          <div style={{...card(),padding:"1.25rem"}}>
+            <p style={{fontSize:13,fontWeight:600,margin:"0 0 12px",color:C.gold}}>+ Dodaj novu firmu</p>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div style={{flex:2,minWidth:150}}>
+                <p style={{fontSize:11,color:C.dim,margin:"0 0 4px"}}>Naziv firme</p>
+                <input placeholder="Npr. Gradnja d.o.o." value={novaFirma.naziv} onChange={e=>setNovaFirma(p=>({...p,naziv:e.target.value}))} style={inp({padding:"8px 12px",fontSize:13})}/>
+              </div>
+              <div style={{flex:1,minWidth:120}}>
+                <p style={{fontSize:11,color:C.dim,margin:"0 0 4px"}}>Slug (URL)</p>
+                <input placeholder="gradnja-doo" value={novaFirma.slug} onChange={e=>setNovaFirma(p=>({...p,slug:e.target.value.toLowerCase().replace(/\s+/g,"-")}))} style={inp({padding:"8px 12px",fontSize:13})}/>
+              </div>
+              <button onClick={handleDodajFirmu} style={btn("gold",{whiteSpace:"nowrap"})}>+ Dodaj firmu</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── KORISNICI ── */}
+      {tab==="korisnici"&&(
+        <div style={{flex:1,overflow:"auto",padding:"1.5rem",maxWidth:800,width:"100%",margin:"0 auto"}}>
+          <h2 style={{fontFamily:C.font,fontSize:20,fontWeight:700,margin:"0 0 1.25rem"}}>Korisnici</h2>
+          <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:"2rem"}}>
+            {korisnici.filter(k=>k.uloga!=="superadmin").map(k=>{
+              const firma = firme.find(f=>f.id===k.firma_id);
+              const editingPass = editPassKorisnik===k.id;
+              return (
+                <div key={k.id} style={{...card(),padding:"14px 18px"}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{flex:1}}>
+                      <p style={{margin:"0 0 2px",fontSize:14,fontWeight:600}}>{k.username}</p>
+                      <p style={{margin:0,fontSize:12,color:C.muted}}>{firma?.naziv||"—"} · {k.uloga}</p>
+                    </div>
+                    <button onClick={()=>setEditPassKorisnik(editingPass?null:k.id)} style={btn("ghost",{fontSize:12,padding:"5px 12px"})}>🔑 Lozinka</button>
+                    <button onClick={()=>handleObrisiKorisnika(k.id)} style={btn("danger",{fontSize:12,padding:"5px 12px"})}>Obriši</button>
+                  </div>
+                  {editingPass&&(
+                    <div style={{marginTop:10,display:"flex",gap:8,alignItems:"center",paddingTop:10,borderTop:`1px solid ${C.border}`}}>
+                      <input type="password" placeholder="Nova lozinka (min. 6 znakova)" value={novaLozinka[k.id]||""} onChange={e=>setNovaLozinka(p=>({...p,[k.id]:e.target.value}))} style={{...inp({padding:"7px 12px",fontSize:13}),flex:1}}/>
+                      <button onClick={()=>handlePromijeniPass(k.id)} style={btn("green",{whiteSpace:"nowrap",padding:"7px 14px"})}>Sačuvaj</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{...card(),padding:"1.25rem"}}>
+            <p style={{fontSize:13,fontWeight:600,margin:"0 0 12px",color:C.gold}}>+ Dodaj korisnika</p>
+            <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"flex-end"}}>
+              <div style={{flex:1,minWidth:140}}>
+                <p style={{fontSize:11,color:C.dim,margin:"0 0 4px"}}>Firma</p>
+                <select value={noviKorisnik.firmaId} onChange={e=>setNoviKorisnik(p=>({...p,firmaId:e.target.value}))} style={inp({padding:"8px 10px",fontSize:13,cursor:"pointer",color:C.text})}>
+                  <option value="">Odaberi firmu</option>
+                  {firme.map(f=><option key={f.id} value={f.id}>{f.naziv}</option>)}
+                </select>
+              </div>
+              <div style={{flex:1,minWidth:120}}>
+                <p style={{fontSize:11,color:C.dim,margin:"0 0 4px"}}>Korisničko ime</p>
+                <input placeholder="username" value={noviKorisnik.username} onChange={e=>setNoviKorisnik(p=>({...p,username:e.target.value}))} style={inp({padding:"8px 12px",fontSize:13})}/>
+              </div>
+              <div style={{flex:1,minWidth:120}}>
+                <p style={{fontSize:11,color:C.dim,margin:"0 0 4px"}}>Lozinka</p>
+                <input type="password" placeholder="lozinka" value={noviKorisnik.password} onChange={e=>setNoviKorisnik(p=>({...p,password:e.target.value}))} style={inp({padding:"8px 12px",fontSize:13})}/>
+              </div>
+              <button onClick={handleDodajKorisnika} style={btn("gold",{whiteSpace:"nowrap"})}>+ Dodaj</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── SVI UPITI ── */}
+      {tab==="upiti"&&(
+        <div style={{flex:1,overflow:"auto",padding:"1.5rem"}}>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap"}}>
+            <h2 style={{fontFamily:C.font,fontSize:20,fontWeight:700,margin:0}}>Svi upiti</h2>
+            <select value={filterFirma} onChange={e=>setFilterFirma(e.target.value)} style={{...inp({padding:"6px 10px",fontSize:13,cursor:"pointer",color:C.text}),width:"auto"}}>
+              <option value="sve">Sve firme</option>
+              {firme.map(f=><option key={f.id} value={f.id}>{f.naziv}</option>)}
+            </select>
+            <span style={pill("blue")}>{filtrirani.length} upita</span>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {filtrirani.map(u=>{
+              const firma = firme.find(f=>f.id===u._firma_id);
+              const uk = u.stavke?.reduce((s,x)=>s+x.kolicina*x.cijena,0)||0;
+              return (
+                <div key={u.id} style={{...card(),padding:"14px 18px",display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:2}}>
+                      <p style={{margin:0,fontSize:14,fontWeight:600}}>{u.ime}</p>
+                      {firma&&<span style={pill("blue")}>{firma.naziv}</span>}
+                      <StatusBadge s={u.status}/>
+                    </div>
+                    <p style={{margin:0,fontSize:12,color:C.muted}}>{u.telefon} · {u.datum}</p>
+                  </div>
+                  {uk>0&&<span style={{fontSize:13,fontWeight:700,color:C.gold,flexShrink:0}}>{fmtKM(uk*1.17)}</span>}
+                </div>
+              );
+            })}
+            {filtrirani.length===0&&<p style={{fontSize:13,color:C.dim,textAlign:"center",padding:"2rem"}}>Nema upita.</p>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── GLAVNA APLIKACIJA ────────────────────────────────────────────────────────
+export default function App() {
+  // ── Routing — čitaj slug iz URL ─────────────────────────────────────────
+  const firmaSlug = window.location.pathname.replace(/^\//, "").split("/")[0] || null;
+
+  const [view,setView] = useState("home");
+  const [adminView,setAdminView] = useState(null); // null | "login" | "panel" | "superadmin"
+  const [korisnik,setKorisnik] = useState(null); // prijavljeni korisnik
+  const [firma,setFirma] = useState(null); // firma za ovaj URL
+  const [kategorije,setKategorijeLoc] = useState(INIT_KATEGORIJE);
+  const [upiti,setUpitiLoc] = useState([]);
+  const [fazeKat,setFazeKatLoc] = useState(INIT_FAZE_KAT);
+  const [loading,setLoading] = useState(true);
+  const [aktivnaKat,setAktivnaKat] = useState(INIT_KATEGORIJE[0].id);
+  const [showChangePass,setShowChangePass] = useState(false);
+
+  useEffect(()=>{
+    async function load(){
+      setLoading(true);
+      let currentFirma = null;
+      if(firmaSlug) {
+        currentFirma = await getFirmaBySlug(firmaSlug);
+        setFirma(currentFirma);
+      }
+      const fId = currentFirma?.id || null;
+      const [kat,faze,upitiData]=await Promise.all([
+        dbGet("kategorije",INIT_KATEGORIJE,fId),
+        dbGet("faze_kat",INIT_FAZE_KAT,fId),
+        upitiGet(fId),
+      ]);
       setKategorijeLoc(kat);setFazeKatLoc(faze);setUpitiLoc(upitiData);
       setAktivnaKat(kat[0]?.id||INIT_KATEGORIJE[0].id);
       setLoading(false);
@@ -946,17 +1317,27 @@ export default function App() {
     load();
   },[]);
 
-  // Syncs na Supabase — poziva se samo kad admin klikne Sačuvaj
-  const syncKategorije = async (val) => { setKategorijeLoc(val); await dbSet("kategorije",val); };
+  const firmaId = firma?.id || null;
+
+  const syncKategorije = async (val) => { setKategorijeLoc(val); await dbSet("kategorije",val,firmaId); };
 
   const setUpiti = (next) => setUpitiLoc(prev=>{
     const r=typeof next==="function"?next(prev):next;
     if(Array.isArray(r)&&Array.isArray(prev)){
-      r.filter(u=>!prev.find(p=>p.id===u.id)).forEach(u=>upitiUpsert(u));
+      r.filter(u=>!prev.find(p=>p.id===u.id)).forEach(u=>upitiUpsert(u,firmaId));
       r.filter(u=>{const o=prev.find(p=>p.id===u.id);return o&&JSON.stringify(o)!==JSON.stringify(u);}).forEach(u=>upitiUpdate(u));
     }
     return r;
   });
+
+  const handleLogin = (k) => {
+    setKorisnik(k);
+    if(k.uloga==="superadmin") setAdminView("superadmin");
+    else setAdminView("panel");
+  };
+
+  const handleLogout = () => { setKorisnik(null); setAdminView(null); };
+
   const [stavke,setStavke] = useState({});
   const [kontakt,setKontakt] = useState({ime:"",telefon:"",email:"",napomena:""});
   const [sidebar,setSidebar] = useState(true);
@@ -970,13 +1351,13 @@ export default function App() {
   const [prethodniView,setPrethodniView] = useState("home");
   const [upitnik,setUpitnik] = useState({finansiranje:"",lokacija:"",grad:"",ravnoZemljiste:null,pristupniPut:null,gradjevinDozvola:null,strujaVoda:null,pocetakRadova:"",temelji:"",krov:""});
   const [profil,setProfil] = useState(INIT_PROFIL);
-  useEffect(()=>{dbGet("profil",INIT_PROFIL).then(p=>setProfil(p));},[]);
+  useEffect(()=>{ if(!loading) dbGet("profil",INIT_PROFIL,firmaId).then(p=>setProfil(p)); },[loading]);
 
   const ukupno = Object.values(stavke).reduce((s,x)=>s+x.kolicina*x.cijena,0);
   const broJStavki = Object.values(stavke).filter(s=>s.kolicina>0).length;
   const aktivneStavke = Object.entries(stavke).filter(([,s])=>s.kolicina>0);
   const ukupnoFaze = FAZE.filter(f=>odabraneFaze.includes(f.id)).reduce((s,f)=>s+f.cijena,0);
-  const odabraneStavkeFaze = odabraneFaze.flatMap(fId=>(fazeKat[fId]||[]).map(s=>({...s,kolicina:fazeStavke[s.id]||0,iznos:(fazeStavke[s.id]||0)*s.cijena})));
+  const odabraneStavkeFaze = odabraneFaze.flatMap(fId2=>(fazeKat[fId2]||[]).map(s=>({...s,kolicina:fazeStavke[s.id]||0,iznos:(fazeStavke[s.id]||0)*s.cijena})));
 
   const setKolicina = (id,cijena,naziv,jm,val) => setStavke(prev=>({...prev,[id]:{kolicina:parseFloat(val)||0,cijena,naziv,jm}}));
   const setU = (key,val) => setUpitnik(p=>({...p,[key]:val}));
@@ -989,7 +1370,6 @@ export default function App() {
   const nazad = () => { setView(prethodniView); setPrethodniView("home"); };
 
   const upitnikValidan = upitnik.finansiranje&&upitnik.lokacija&&upitnik.grad&&upitnik.ravnoZemljiste!==null&&upitnik.pristupniPut!==null&&upitnik.gradjevinDozvola!==null&&upitnik.strujaVoda!==null&&upitnik.pocetakRadova&&upitnik.temelji&&upitnik.krov;
-
   const telefonValidan = /^[\+]?[\d\s\-\(\)]{8,15}$/.test(kontakt.telefon);
   const emailValidan = !kontakt.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(kontakt.email);
 
@@ -1008,8 +1388,23 @@ export default function App() {
     setUpitnik({finansiranje:"",lokacija:"",grad:"",ravnoZemljiste:null,pristupniPut:null,gradjevinDozvola:null,strujaVoda:null,pocetakRadova:"",temelji:"",krov:""});
   };
 
-  if(adminView==="login") return <AdminLogin onLogin={()=>setAdminView("panel")} onCancel={()=>setAdminView(null)}/>;
-  if(adminView==="panel") return <AdminPanel kategorije={kategorije} setKategorije={syncKategorije} upiti={upiti} setUpiti={setUpiti} fazeKatProp={fazeKat} onFazeKatChange={async next=>{setFazeKatLoc(next);await dbSet("faze_kat",next);}} onBack={()=>setAdminView(null)}/>;
+  // ── Render logic ──────────────────────────────────────────────────────────
+  if(adminView==="login") return <AdminLogin firmaSlug={firmaSlug} onLogin={handleLogin} onCancel={()=>setAdminView(null)}/>;
+  if(adminView==="superadmin") return <SuperAdminPanel onLogout={handleLogout}/>;
+  if(adminView==="panel") return (
+    <>
+      <AdminPanel
+        kategorije={kategorije} setKategorije={syncKategorije}
+        upiti={upiti} setUpiti={setUpiti}
+        fazeKatProp={fazeKat} onFazeKatChange={async next=>{setFazeKatLoc(next);await dbSet("faze_kat",next,firmaId);}}
+        firmaId={firmaId} korisnik={korisnik}
+        onBack={()=>setAdminView(null)}
+        onLogout={handleLogout}
+        onChangePass={()=>setShowChangePass(true)}
+      />
+      {showChangePass&&korisnik&&<PromijeniLozinku korisnikId={korisnik.id} onClose={()=>setShowChangePass(false)}/>}
+    </>
+  );
 
   const GF = () => <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Serif+Display&display=swap" rel="stylesheet"/>;
 
