@@ -969,6 +969,8 @@ export default function App() {
   const [datumGod,setDatumGod] = useState("");
   const [prethodniView,setPrethodniView] = useState("home");
   const [upitnik,setUpitnik] = useState({finansiranje:"",lokacija:"",grad:"",ravnoZemljiste:null,pristupniPut:null,gradjevinDozvola:null,strujaVoda:null,pocetakRadova:"",temelji:"",krov:""});
+  const [profil,setProfil] = useState(INIT_PROFIL);
+  useEffect(()=>{dbGet("profil",INIT_PROFIL).then(p=>setProfil(p));},[]);
 
   const ukupno = Object.values(stavke).reduce((s,x)=>s+x.kolicina*x.cijena,0);
   const broJStavki = Object.values(stavke).filter(s=>s.kolicina>0).length;
@@ -1304,8 +1306,8 @@ export default function App() {
         <p style={{color:C.dim,fontSize:13,margin:"0 0 2.5rem"}}>{imaProjekat==="ne"?`Okvirna vrijednost: ~${ukupnoFaze.toLocaleString("bs-BA")} KM`:`Ukupna vrijednost: ${fmtKM(ukupno*1.17)} (sa PDV)`}</p>
         <div style={{...card(),padding:"1.25rem 2rem",marginBottom:"2rem",textAlign:"left"}}>
           <p style={{fontSize:11,color:C.muted,margin:"0 0 6px",textTransform:"uppercase",letterSpacing:"0.06em"}}>Kontakt izvođača</p>
-          <p style={{fontSize:16,fontWeight:700,margin:"0 0 2px"}}>Troškovi gradnje</p>
-          <p style={{fontSize:13,color:C.gold,margin:0,fontWeight:500}}>+387 65 123 456</p>
+          <p style={{fontSize:16,fontWeight:700,margin:"0 0 2px"}}>{profil.naziv}</p>
+          <p style={{fontSize:13,color:C.gold,margin:0,fontWeight:500}}>{profil.telefon}</p>
         </div>
         <button onClick={resetujSesiju} style={{...btn("ghost"),padding:"11px 28px",fontSize:14}}>Novi predmjer</button>
       </div>
