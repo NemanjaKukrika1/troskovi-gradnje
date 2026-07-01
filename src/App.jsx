@@ -210,10 +210,13 @@ async function dbGet(key, fallback, firmaId=null) {
 }
 async function dbSet(key, value, firmaId=null) {
   try {
-    const rec = {key,data:value,updated_at:new Date().toISOString()};
-    if(firmaId) rec.firma_id=firmaId; else rec.firma_id=null;
-    await supabase.from('settings').upsert(rec,{onConflict:'key,firma_id'});
-  } catch(e){console.error(e);}
+    // Delete existing record first, then insert — avoids constraint issues
+    let dq = supabase.from('settings').delete().eq('key',key);
+    if(firmaId) dq = dq.eq('firma_id',firmaId); else dq = dq.is('firma_id',null);
+    await dq;
+    const rec = {key, data:value, updated_at:new Date().toISOString(), firma_id:firmaId||null};
+    await supabase.from('settings').insert(rec);
+  } catch(e){console.error('dbSet error:',e);}
 }
 
 // Upiti per firma
@@ -352,8 +355,9 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
 
   // Dynamic faze list
   const [fazeList,setFazeListRaw] = useState(FAZE);
+  const [fazeListPromjene,setFazeListPromjene] = useState(false);
   useEffect(()=>{ dbGet("faze_list",FAZE,firmaId).then(f=>{ setFazeListRaw(f); if(f.length>0&&!aktivnaAdminFaza) setAktivnaAdminFaza(f[0].id); }); },[]);
-  const saveFazeList = (next) => { setFazeListRaw(next); dbSet("faze_list",next,firmaId); };
+  const saveFazeList = (next) => { setFazeListRaw(next); setFazeListPromjene(true); };
 
   const dodajFazu = () => {
     if(!novaFaza.naziv) return;
@@ -361,9 +365,9 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
     const nova = {id,naziv:novaFaza.naziv,ikona:novaFaza.ikona||"🏗",opis:novaFaza.opis,cijena:parseFloat(novaFaza.cijena)||0,stavke:[]};
     saveFazeList([...fazeList,nova]);
     setFazeKatLok(prev=>({...prev,[id]:[]}));
+    setFazePromjene(true);
     setAktivnaAdminFaza(id);
     setNovaFaza({naziv:"",ikona:"🏗",opis:"",cijena:""});
-    flash("Faza dodana ✓");
   };
 
   const obrisiFirezu = (fId) => {
@@ -373,24 +377,23 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
     setFazeKatLok(prev=>{const n={...prev};delete n[fId];return n;});
     setFazePromjene(true);
     setAktivnaAdminFaza(ostale[0]?.id||null);
-    flash("Faza obrisana ✓");
   };
 
   const sacuvajFazuMeta = (fId,data) => {
     saveFazeList(fazeList.map(f=>f.id!==fId?f:{...f,...data}));
     setEditFazaId(null);
-    flash("Faza ažurirana ✓");
   };
 
   const sacuvajUSbazu = async () => {
     setSprema(true);
     if (katPromjene) { await syncKategorije(kategorije); setKatPromjene(false); }
-    if (fazePromjene) { onFazeKatChange(fazeKat); setFazePromjene(false); }
+    if (fazePromjene) { await onFazeKatChange(fazeKat); setFazePromjene(false); }
+    if (fazeListPromjene) { await dbSet("faze_list",fazeList,firmaId); setFazeListPromjene(false); }
     setSprema(false);
     flash("Sve izmjene sačuvane u bazu ✓");
   };
 
-  const imaPromjena = katPromjene || fazePromjene;
+  const imaPromjena = katPromjene || fazePromjene || fazeListPromjene;
 
   const [aktKat,setAktKat] = useState(kategorije[0]?.id);
   const [editCijena,setEditCijena] = useState({});
