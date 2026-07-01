@@ -350,6 +350,38 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
     setFazePromjene(true);
   };
 
+  // Dynamic faze list
+  const [fazeList,setFazeListRaw] = useState(FAZE);
+  useEffect(()=>{ dbGet("faze_list",FAZE,firmaId).then(f=>{ setFazeListRaw(f); if(f.length>0&&!aktivnaAdminFaza) setAktivnaAdminFaza(f[0].id); }); },[]);
+  const saveFazeList = (next) => { setFazeListRaw(next); dbSet("faze_list",next,firmaId); };
+
+  const dodajFazu = () => {
+    if(!novaFaza.naziv) return;
+    const id = `f${genId()}`;
+    const nova = {id,naziv:novaFaza.naziv,ikona:novaFaza.ikona||"🏗",opis:novaFaza.opis,cijena:parseFloat(novaFaza.cijena)||0,stavke:[]};
+    saveFazeList([...fazeList,nova]);
+    setFazeKatLok(prev=>({...prev,[id]:[]}));
+    setAktivnaAdminFaza(id);
+    setNovaFaza({naziv:"",ikona:"🏗",opis:"",cijena:""});
+    flash("Faza dodana ✓");
+  };
+
+  const obrisiFirezu = (fId) => {
+    if(!window.confirm("Obrisati fazu i sve njene stavke?")) return;
+    const ostale = fazeList.filter(f=>f.id!==fId);
+    saveFazeList(ostale);
+    setFazeKatLok(prev=>{const n={...prev};delete n[fId];return n;});
+    setFazePromjene(true);
+    setAktivnaAdminFaza(ostale[0]?.id||null);
+    flash("Faza obrisana ✓");
+  };
+
+  const sacuvajFazuMeta = (fId,data) => {
+    saveFazeList(fazeList.map(f=>f.id!==fId?f:{...f,...data}));
+    setEditFazaId(null);
+    flash("Faza ažurirana ✓");
+  };
+
   const sacuvajUSbazu = async () => {
     setSprema(true);
     if (katPromjene) { await syncKategorije(kategorije); setKatPromjene(false); }
@@ -373,7 +405,10 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
   const [novaKat,setNovaKat] = useState({naziv:"",ikona:"🔧"});
   const [editFazaCijena,setEditFazaCijena] = useState({});
   const [novaFazaStavka,setNovaFazaStavka] = useState({naziv:"",jm:"m²",cijena:"",opis:""});
-  const [aktivnaAdminFaza,setAktivnaAdminFaza] = useState("f1");
+  const [aktivnaAdminFaza,setAktivnaAdminFaza] = useState(null);
+  const [novaFaza,setNovaFaza] = useState({naziv:"",ikona:"🏗",opis:"",cijena:""});
+  const [editFazaId,setEditFazaId] = useState(null);
+  const [editFazaData,setEditFazaData] = useState({});
   const [pretraga,setPretraga] = useState("");
   const [filterStatus,setFilterStatus] = useState("svi");
   const [poruka,setPoruka] = useState("");
@@ -908,24 +943,45 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
         <div style={{flex:1,display:"flex",overflow:"auto"}}>
           <div style={{width:220,flexShrink:0,background:C.bg3,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column"}}>
             <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`}}><p style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",margin:0}}>Faze gradnje</p></div>
-            {FAZE.map(f=>(
-              <div key={f.id} onClick={()=>setAktivnaAdminFaza(f.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktivnaAdminFaza===f.id?C.bg:C.bg3,borderLeft:aktivnaAdminFaza===f.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"pointer"}}>
-                <span style={{fontSize:18}}>{f.ikona}</span>
-                <div style={{minWidth:0}}>
-                  <p style={{margin:0,fontSize:13,color:aktivnaAdminFaza===f.id?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.naziv.split("—")[0].trim()}</p>
-                  <p style={{margin:0,fontSize:11,color:C.dim}}>{(fazeKat[f.id]||[]).length} stavki</p>
+            <div style={{flex:1,overflow:"auto"}}>
+              {fazeList.map(f=>(
+                <div key={f.id} onClick={()=>setAktivnaAdminFaza(f.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktivnaAdminFaza===f.id?C.bg:C.bg3,borderLeft:aktivnaAdminFaza===f.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"pointer",position:"relative"}}>
+                  <span style={{fontSize:18}}>{f.ikona}</span>
+                  <div style={{flex:1,minWidth:0}}>
+                    <p style={{margin:0,fontSize:13,color:aktivnaAdminFaza===f.id?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.naziv}</p>
+                    <p style={{margin:0,fontSize:11,color:C.dim}}>{(fazeKat[f.id]||[]).length} stavki</p>
+                  </div>
+                  <button onClick={e=>{e.stopPropagation();obrisiFirezu(f.id);}} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:13,padding:0,flexShrink:0}}>✕</button>
                 </div>
+              ))}
+            </div>
+            <div style={{padding:12,borderTop:`1px solid ${C.border}`}}>
+              <p style={{fontSize:11,color:C.dim,margin:"0 0 6px",fontWeight:500}}>Nova faza</p>
+              <div style={{display:"flex",gap:6,marginBottom:6}}>
+                <input placeholder="🏗" value={novaFaza.ikona} onChange={e=>setNovaFaza(p=>({...p,ikona:e.target.value}))} style={{...inp({width:44,padding:"6px 8px",fontSize:14,textAlign:"center"})}}/>
+                <input placeholder="Naziv faze" value={novaFaza.naziv} onChange={e=>setNovaFaza(p=>({...p,naziv:e.target.value}))} style={inp({padding:"6px 10px",fontSize:12})}/>
               </div>
-            ))}
+              <input placeholder="Kratki opis" value={novaFaza.opis} onChange={e=>setNovaFaza(p=>({...p,opis:e.target.value}))} style={{...inp({padding:"6px 10px",fontSize:12}),marginBottom:6}}/>
+              <button onClick={dodajFazu} style={{...btn("ghost",{width:"100%",fontSize:12,border:`1px solid ${C.border2}`,color:C.gold})}}>+ Dodaj fazu</button>
+            </div>
           </div>
           <div style={{flex:1,overflow:"auto",padding:"1.5rem"}}>
             {(()=>{
-              const f=FAZE.find(x=>x.id===aktivnaAdminFaza);
+              const f=fazeList.find(x=>x.id===aktivnaAdminFaza);
               const stavke=fazeKat[aktivnaAdminFaza]||[];
               return (<>
-                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem"}}>
+                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem",flexWrap:"wrap"}}>
                   <span style={{fontSize:28}}>{f?.ikona}</span>
-                  <h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:"0 0 2px"}}>{f?.naziv}</h2>
+                  {editFazaId===aktivnaAdminFaza ? (<>
+                    <input value={editFazaData.ikona??f?.ikona??""} onChange={e=>setEditFazaData(p=>({...p,ikona:e.target.value}))} style={{width:44,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:7,padding:"5px 8px",fontSize:18,fontFamily:C.font,outline:"none",textAlign:"center"}}/>
+                    <input value={editFazaData.naziv??f?.naziv??""} onChange={e=>setEditFazaData(p=>({...p,naziv:e.target.value}))} style={{flex:1,minWidth:120,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:7,padding:"5px 10px",fontSize:16,fontWeight:700,fontFamily:C.font,outline:"none",color:C.text}}/>
+                    <input value={editFazaData.opis??f?.opis??""} onChange={e=>setEditFazaData(p=>({...p,opis:e.target.value}))} placeholder="Kratki opis" style={{flex:2,minWidth:140,background:"#fff",border:`1px solid ${C.gold}`,borderRadius:7,padding:"5px 10px",fontSize:13,fontFamily:C.font,outline:"none",color:C.text}}/>
+                    <button onClick={()=>sacuvajFazuMeta(aktivnaAdminFaza,editFazaData)} style={btn("green",{padding:"5px 12px",borderRadius:7})}>✓</button>
+                    <button onClick={()=>setEditFazaId(null)} style={btn("ghost",{padding:"5px 10px",borderRadius:7})}>✕</button>
+                  </>) : (<>
+                    <h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:"0 0 2px"}}>{f?.naziv}</h2>
+                    <button onClick={()=>{setEditFazaId(aktivnaAdminFaza);setEditFazaData({ikona:f?.ikona,naziv:f?.naziv,opis:f?.opis});}} style={btn("ghost",{padding:"4px 10px",borderRadius:6,fontSize:12})}>✏</button>
+                  </>)}
                   <span style={pill("blue")}>{stavke.length} stavki</span>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:6,marginBottom:"1.5rem"}}>
@@ -1125,7 +1181,7 @@ function PromijeniLozinku({korisnikId,onClose}) {
 }
 
 // ─── SUPER ADMIN PANEL ───────────────────────────────────────────────────────
-function SuperAdminPanel({onLogout}) {
+function SuperAdminPanel({onLogout,kategorije:katInit,setKategorije:syncKategorije,upiti,setUpiti,fazeKatProp,onFazeKatChange,firmaIdProp}) {
   const [tab,setTab] = useState("firme");
   const [firme,setFirme] = useState([]);
   const [korisnici,setKorisnici] = useState([]);
@@ -1137,6 +1193,7 @@ function SuperAdminPanel({onLogout}) {
   const [editPassKorisnik,setEditPassKorisnik] = useState(null);
   const [novaLozinka,setNovaLozinka] = useState({});
   const [filterFirma,setFilterFirma] = useState("sve");
+  const [aktivnaFirma,setAktivnaFirma] = useState(null); // kad superadmin uđe u firmu
 
   const flash = msg => {setPoruka(msg);setTimeout(()=>setPoruka(""),2500);};
 
@@ -1173,6 +1230,25 @@ function SuperAdminPanel({onLogout}) {
     if(await obrisiFiremu(id)){setFirme(p=>p.filter(f=>f.id!==id));setKorisnici(p=>p.filter(k=>k.firma_id!==id));flash("Firma obrisana ✓");}
   };
 
+  const [firmaKategorije,setFirmaKategorijeLok] = useState(INIT_KATEGORIJE);
+  const [firmaFazeKat,setFirmaFazeKatLok] = useState(INIT_FAZE_KAT);
+  const [firmaUpiti,setFirmaUpitiLok] = useState([]);
+  const [firmaLoading,setFirmaLoading] = useState(false);
+
+  const uđiUFiremu = async (firma) => {
+    setFirmaLoading(true);
+    const [kat,faze,upitiData] = await Promise.all([
+      dbGet("kategorije",INIT_KATEGORIJE,firma.id),
+      dbGet("faze_kat",INIT_FAZE_KAT,firma.id),
+      upitiGet(firma.id),
+    ]);
+    setFirmaKategorijeLok(kat);setFirmaFazeKatLok(faze);setFirmaUpitiLok(upitiData);
+    setAktivnaFirma(firma);
+    setFirmaLoading(false);
+  };
+
+  const syncFirmaKategorije = async (val) => { setFirmaKategorijeLok(val); await dbSet("kategorije",val,aktivnaFirma?.id); };
+
   const handlePromijeniPass = async (korisnikId) => {
     const nova = novaLozinka[korisnikId];
     if(!nova||nova.length<6){flash("Lozinka mora imati min. 6 znakova.");return;}
@@ -1192,6 +1268,26 @@ function SuperAdminPanel({onLogout}) {
       <GFont/>
       <p style={{color:C.muted}}>Učitavanje...</p>
     </div>
+  );
+
+  if(firmaLoading) return (
+    <div style={{minHeight:"100vh",background:C.bg,display:"flex",alignItems:"center",justifyContent:"center",fontFamily:C.font,flexDirection:"column",gap:12}}>
+      <GFont/>
+      <div style={{width:36,height:36,border:`3px solid ${C.border}`,borderTop:`3px solid ${C.gold}`,borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+      <p style={{color:C.muted,fontSize:14}}>Učitavanje podataka firme...</p>
+    </div>
+  );
+
+  if(aktivnaFirma) return (
+    <AdminPanel
+      kategorije={firmaKategorije} setKategorije={syncFirmaKategorije}
+      upiti={firmaUpiti} setUpiti={next=>setFirmaUpitiLok(typeof next==="function"?next(firmaUpiti):next)}
+      fazeKatProp={firmaFazeKat} onFazeKatChange={async next=>{setFirmaFazeKatLok(next);await dbSet("faze_kat",next,aktivnaFirma.id);}}
+      firmaId={aktivnaFirma.id} korisnik={null}
+      onBack={()=>setAktivnaFirma(null)}
+      onLogout={null} onChangePass={null}
+    />
   );
 
   return (
@@ -1223,6 +1319,7 @@ function SuperAdminPanel({onLogout}) {
                   <p style={{margin:0,fontSize:12,color:C.muted}}>/{f.slug} · {korisnici.filter(k=>k.firma_id===f.id).length} korisnika</p>
                 </div>
                 <a href={`/${f.slug}`} target="_blank" rel="noreferrer" style={{...btn("ghost",{fontSize:12,padding:"5px 12px"}),textDecoration:"none"}}>Otvori →</a>
+                <button onClick={()=>uđiUFiremu(f)} style={btn("gold",{fontSize:12,padding:"5px 12px"})}>⚙ Upravljaj</button>
                 <button onClick={()=>handleObrisiFiremu(f.id)} style={btn("danger",{fontSize:12,padding:"5px 12px"})}>Obriši</button>
               </div>
             ))}
@@ -1785,39 +1882,44 @@ export default function App() {
 
       {view==="kalkulacija"&&(
         <div style={{flex:1,display:"flex",overflow:"auto"}}>
-          <div style={{width:sidebar?225:48,flexShrink:0,background:C.bg3,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",transition:"width 0.2s",overflow:"hidden"}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:sidebar?"space-between":"center",padding:sidebar?"12px 14px":"12px 0",borderBottom:`1px solid ${C.border}`}}>
+          <div style={{width:sidebar?200:40,flexShrink:0,background:C.bg3,borderRight:`1px solid ${C.border}`,display:"flex",flexDirection:"column",transition:"width 0.2s",overflow:"hidden"}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:sidebar?"space-between":"center",padding:sidebar?"10px 12px":"10px 0",borderBottom:`1px solid ${C.border}`}}>
               {sidebar&&<span style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase"}}>Kategorije</span>}
               <button onClick={()=>setSidebar(!sidebar)} style={{background:"transparent",border:"none",color:C.dim,cursor:"pointer",fontSize:16,padding:0}}>{sidebar?"◂":"▸"}</button>
             </div>
             {kategorije.map(k=>(
-              <button key={k.id} onClick={()=>setAktivnaKat(k.id)} style={{display:"flex",alignItems:"center",gap:10,padding:sidebar?"10px 14px":"12px 0",justifyContent:sidebar?"flex-start":"center",background:aktivnaKat===k.id?C.bg:C.bg3,border:"none",borderLeft:aktivnaKat===k.id?`3px solid ${C.gold}`:"3px solid transparent",color:aktivnaKat===k.id?C.text:C.dim,cursor:"pointer",fontFamily:C.font,fontSize:13,whiteSpace:"nowrap",width:"100%",textAlign:"left",transition:"all 0.1s"}}>
-                <span style={{fontSize:18,flexShrink:0}}>{k.ikona}</span>
-                {sidebar&&<span style={{overflow:"hidden",textOverflow:"ellipsis"}}>{k.naziv}</span>}
+              <button key={k.id} onClick={()=>setAktivnaKat(k.id)} style={{display:"flex",alignItems:"center",gap:8,padding:sidebar?"9px 12px":"10px 0",justifyContent:sidebar?"flex-start":"center",background:aktivnaKat===k.id?C.bg:C.bg3,border:"none",borderLeft:aktivnaKat===k.id?`3px solid ${C.gold}`:"3px solid transparent",color:aktivnaKat===k.id?C.text:C.dim,cursor:"pointer",fontFamily:C.font,fontSize:12,width:"100%",textAlign:"left",transition:"all 0.1s"}}>
+                <span style={{fontSize:16,flexShrink:0}}>{k.ikona}</span>
+                {sidebar&&<span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{k.naziv}</span>}
               </button>
             ))}
           </div>
 
-          <div style={{flex:1,overflow:"auto",padding:"1.5rem"}}>
+          <div style={{flex:1,overflow:"auto",padding:"1rem"}}>
             {kategorije.filter(k=>k.id===aktivnaKat).map(kat=>(
               <div key={kat.id}>
-                <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:"1.25rem"}}>
-                  <span style={{fontSize:28}}>{kat.ikona}</span>
-                  <div><h2 style={{fontFamily:C.font,fontSize:22,fontWeight:700,margin:0}}>{kat.naziv}</h2><p style={{fontSize:12,color:C.dim,margin:0}}>Unesite količinu za svaku stavku</p></div>
+                <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:"1rem"}}>
+                  <span style={{fontSize:24}}>{kat.ikona}</span>
+                  <div>
+                    <h2 style={{fontFamily:C.font,fontSize:18,fontWeight:700,margin:0}}>{kat.naziv}</h2>
+                    <p style={{fontSize:11,color:C.dim,margin:0}}>Unesite količinu za svaku stavku</p>
+                  </div>
                 </div>
                 <div style={{display:"flex",flexDirection:"column",gap:8}}>
                   {kat.stavke.map(s=>{
                     const kol=stavke[s.id]?.kolicina||0;const akt=kol>0;
                     return (
-                      <div key={s.id} style={{...card(),background:akt?C.greenBg:C.bg3,border:`1px solid ${akt?C.greenBd:C.border}`,padding:"14px 16px",display:"flex",alignItems:"center",gap:12,transition:"all 0.15s"}}>
-                        <div style={{flex:1,minWidth:0}}>
-                          <p style={{margin:"0 0 2px",fontSize:14,color:akt?C.green:C.text,fontWeight:akt?600:400}}>{s.naziv}</p>
-                          <p style={{margin:0,fontSize:14,color:C.dim}}>{s.cijena.toFixed(2)} KM / {s.jm}{s.jm==="m³"&&<M3Info naziv={s.naziv}/>}</p>
+                      <div key={s.id} style={{...card(),background:akt?C.greenBg:C.bg3,border:`1px solid ${akt?C.greenBd:C.border}`,padding:"12px 14px",transition:"all 0.15s"}}>
+                        <div style={{display:"flex",alignItems:"flex-start",justifyContent:"space-between",gap:8,marginBottom:8}}>
+                          <div style={{flex:1,minWidth:0}}>
+                            <p style={{margin:"0 0 2px",fontSize:13,color:akt?C.green:C.text,fontWeight:akt?600:400,lineHeight:1.4}}>{s.naziv}</p>
+                            <p style={{margin:0,fontSize:12,color:C.dim}}>{s.cijena.toFixed(2)} KM / {s.jm}{s.jm==="m³"&&<M3Info naziv={s.naziv}/>}</p>
+                          </div>
                         </div>
-                        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-                          <input type="number" min="0" step="0.5" placeholder="0" value={kol||""} onChange={e=>setKolicina(s.id,s.cijena,s.naziv,s.jm,e.target.value)} style={{width:84,background:"#fff",border:`1px solid ${C.border2}`,borderRadius:7,padding:"7px 10px",color:C.text,fontSize:14,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
-                          <span style={{fontSize:14,color:C.muted,display:"flex",alignItems:"center",minWidth:28}}>{s.jm}</span>
-                          <span style={{fontSize:14,fontWeight:600,color:akt?C.gold:C.dim,minWidth:84,textAlign:"right"}}>{akt?fmtKM(kol*s.cijena):"—"}</span>
+                        <div style={{display:"flex",alignItems:"center",gap:8}}>
+                          <input type="number" min="0" step="0.5" placeholder="0" value={kol||""} onChange={e=>setKolicina(s.id,s.cijena,s.naziv,s.jm,e.target.value)} style={{flex:1,minWidth:0,background:"#fff",border:`1px solid ${C.border2}`,borderRadius:7,padding:"8px 10px",color:C.text,fontSize:15,fontFamily:C.font,textAlign:"right",outline:"none"}}/>
+                          <span style={{fontSize:13,color:C.muted,flexShrink:0}}>{s.jm}</span>
+                          <span style={{fontSize:13,fontWeight:600,color:akt?C.gold:C.dim,flexShrink:0,minWidth:70,textAlign:"right"}}>{akt?fmtKM(kol*s.cijena):"—"}</span>
                         </div>
                       </div>
                     );
@@ -1828,26 +1930,26 @@ export default function App() {
           </div>
 
           {aktivneStavke.length>0&&(
-            <div style={{width:265,flexShrink:0,background:C.bg3,borderLeft:`1px solid ${C.border}`,display:"flex",flexDirection:"column",padding:"1rem"}}>
+            <div style={{width:220,flexShrink:0,background:C.bg3,borderLeft:`1px solid ${C.border}`,display:"flex",flexDirection:"column",padding:"1rem"}}>
               <p style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",margin:"0 0 12px"}}>Rekapitulacija</p>
               <div style={{flex:1,overflow:"auto"}}>
                 {aktivneStavke.map(([id,s])=>(
                   <div key={id} style={{borderBottom:`1px solid ${C.border}`,padding:"8px 0"}}>
-                    <p style={{margin:"0 0 2px",fontSize:12,color:C.muted,lineHeight:1.3}}>{s.naziv}</p>
-                    <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:11,color:C.dim}}>{s.kolicina} {s.jm} × {s.cijena} KM</span><span style={{fontSize:12,color:C.gold,fontWeight:500}}>{fmtKM(s.kolicina*s.cijena)}</span></div>
+                    <p style={{margin:"0 0 2px",fontSize:11,color:C.muted,lineHeight:1.3}}>{s.naziv}</p>
+                    <div style={{display:"flex",justifyContent:"space-between"}}><span style={{fontSize:11,color:C.dim}}>{s.kolicina} {s.jm}</span><span style={{fontSize:12,color:C.gold,fontWeight:500}}>{fmtKM(s.kolicina*s.cijena)}</span></div>
                   </div>
                 ))}
               </div>
               <div style={{borderTop:`1px solid ${C.border2}`,paddingTop:12,marginTop:8}}>
                 {[["Bez PDV-a",fmtKM(ukupno)],["PDV (17%)",fmtKM(ukupno*0.17)]].map(([l,v])=>(
-                  <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:12,color:C.dim}}>{l}</span><span style={{fontSize:12}}>{v}</span></div>
+                  <div key={l} style={{display:"flex",justifyContent:"space-between",marginBottom:4}}><span style={{fontSize:11,color:C.dim}}>{l}</span><span style={{fontSize:11}}>{v}</span></div>
                 ))}
-                <div style={{display:"flex",justifyContent:"space-between",marginBottom:16,marginTop:4}}>
-                  <span style={{fontSize:13,fontWeight:600}}>Ukupno</span>
-                  <span style={{fontSize:15,fontWeight:700,color:C.gold}}>{fmtKM(ukupno*1.17)}</span>
+                <div style={{display:"flex",justifyContent:"space-between",marginBottom:14,marginTop:4}}>
+                  <span style={{fontSize:12,fontWeight:600}}>Ukupno</span>
+                  <span style={{fontSize:14,fontWeight:700,color:C.gold}}>{fmtKM(ukupno*1.17)}</span>
                 </div>
                 <button onClick={()=>navigiraj("upitnik")} style={{width:"100%",...btn("gold",{padding:"11px",fontSize:13}),background:`linear-gradient(135deg, ${C.goldL}, ${C.gold})`}}>Pošalji upit →</button>
-                <p style={{fontSize:11,color:C.dim,textAlign:"center",margin:"8px 0 0"}}>Cijene su okvirne · Potvrda stiže emailom</p>
+                <p style={{fontSize:10,color:C.dim,textAlign:"center",margin:"6px 0 0"}}>Cijene su okvirne · Potvrda stiže emailom</p>
               </div>
             </div>
           )}
