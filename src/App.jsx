@@ -990,8 +990,11 @@ export default function App() {
 
   const upitnikValidan = upitnik.finansiranje&&upitnik.lokacija&&upitnik.grad&&upitnik.ravnoZemljiste!==null&&upitnik.pristupniPut!==null&&upitnik.gradjevinDozvola!==null&&upitnik.strujaVoda!==null&&upitnik.pocetakRadova&&upitnik.temelji&&upitnik.krov;
 
+  const telefonValidan = /^[\+]?[\d\s\-\(\)]{8,15}$/.test(kontakt.telefon);
+  const emailValidan = !kontakt.email || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(kontakt.email);
+
   const posaljiUpit = () => {
-    if(!kontakt.ime||!kontakt.telefon)return;
+    if(!kontakt.ime||!kontakt.telefon||!telefonValidan||!emailValidan)return;
     const stavkeFaze = odabraneStavkeFaze.filter(s=>s.kolicina>0).map(s=>({naziv:s.naziv,kolicina:s.kolicina,jm:s.jm,cijena:s.cijena,faza:s.id.split("-")[0]}));
     setUpiti(prev=>[{id:genId(),datum:new Date().toLocaleString("bs-BA").slice(0,16),status:"nov",imaProjekat,odabraneFaze,upitnik,...kontakt,stavke:imaProjekat==="ne"?stavkeFaze:aktivneStavke.map(([,s])=>({naziv:s.naziv,kolicina:s.kolicina,jm:s.jm,cijena:s.cijena}))}, ...prev]);
     setView("upit-poslan");
@@ -1307,7 +1310,8 @@ export default function App() {
         <div style={{...card(),padding:"1.25rem 2rem",marginBottom:"2rem",textAlign:"left"}}>
           <p style={{fontSize:11,color:C.muted,margin:"0 0 6px",textTransform:"uppercase",letterSpacing:"0.06em"}}>Kontakt izvođača</p>
           <p style={{fontSize:16,fontWeight:700,margin:"0 0 2px"}}>{profil.naziv}</p>
-          <p style={{fontSize:13,color:C.gold,margin:0,fontWeight:500}}>{profil.telefon}</p>
+          <p style={{fontSize:13,color:C.muted,margin:"0 0 2px"}}>{profil.telefon}</p>
+          {profil.email&&<p style={{fontSize:13,color:C.gold,margin:0,fontWeight:500}}>{profil.email}</p>}
         </div>
         <button onClick={resetujSesiju} style={{...btn("ghost"),padding:"11px 28px",fontSize:14}}>Novi predmjer</button>
       </div>
@@ -1405,20 +1409,29 @@ export default function App() {
           <div style={{flex:1,padding:"2rem",maxWidth:520}}>
             <h2 style={{fontFamily:C.font,fontSize:26,fontWeight:700,margin:"0 0 0.25rem"}}>Pošaljite upit</h2>
             <p style={{fontSize:13,color:C.dim,margin:"0 0 1.75rem"}}>Izvođač će vas kontaktirati i potvrditi cijene u najkraćem roku.</p>
-            {[{key:"ime",label:"Ime i prezime",placeholder:"Npr. Marko Marković",tip:"text",req:true},{key:"telefon",label:"Broj telefona",placeholder:"+387 6x xxx xxx",tip:"tel",req:true},{key:"email",label:"Email adresa",placeholder:"marko@email.com",tip:"email",req:false}].map(f=>(
-              <div key={f.key} style={{marginBottom:"1rem"}}>
-                <label style={{display:"block",fontSize:12,color:C.muted,marginBottom:6,fontWeight:500}}>{f.label} {f.req&&<span style={{color:C.gold}}>*</span>}</label>
-                <input type={f.tip} placeholder={f.placeholder} value={kontakt[f.key]} onChange={e=>setKontakt(p=>({...p,[f.key]:e.target.value}))} style={inp({background:C.bg3})}/>
-              </div>
-            ))}
+            <div style={{marginBottom:"1rem"}}>
+              <label style={{display:"block",fontSize:12,color:C.muted,marginBottom:6,fontWeight:500}}>Ime i prezime <span style={{color:C.gold}}>*</span></label>
+              <input type="text" placeholder="Npr. Marko Marković" value={kontakt.ime} onChange={e=>setKontakt(p=>({...p,ime:e.target.value}))} style={inp({background:C.bg3})}/>
+            </div>
+            <div style={{marginBottom:"1rem"}}>
+              <label style={{display:"block",fontSize:12,color:C.muted,marginBottom:6,fontWeight:500}}>Broj telefona <span style={{color:C.gold}}>*</span></label>
+              <input type="tel" placeholder="+387 6x xxx xxx" value={kontakt.telefon} onChange={e=>setKontakt(p=>({...p,telefon:e.target.value}))} style={{...inp({background:C.bg3}),borderColor:kontakt.telefon&&!telefonValidan?C.red:undefined}}/>
+              {kontakt.telefon&&!telefonValidan&&<p style={{fontSize:11,color:C.red,margin:"4px 0 0"}}>Unesite ispravan broj telefona (npr. +387 65 123 456)</p>}
+            </div>
+            <div style={{marginBottom:"1rem"}}>
+              <label style={{display:"block",fontSize:12,color:C.muted,marginBottom:6,fontWeight:500}}>Email adresa</label>
+              <input type="email" placeholder="marko@email.com" value={kontakt.email} onChange={e=>setKontakt(p=>({...p,email:e.target.value}))} style={{...inp({background:C.bg3}),borderColor:kontakt.email&&!emailValidan?C.red:undefined}}/>
+              {kontakt.email&&!emailValidan&&<p style={{fontSize:11,color:C.red,margin:"4px 0 0"}}>Unesite ispravnu email adresu (npr. marko@email.com)</p>}
+            </div>
             <div style={{marginBottom:"1.5rem"}}>
               <label style={{display:"block",fontSize:12,color:C.muted,marginBottom:6,fontWeight:500}}>Napomena za korekciju cijene (opcionalno)</label>
               <textarea placeholder="Npr. Da li je moguć popust za veće količine?" value={kontakt.napomena} onChange={e=>setKontakt(p=>({...p,napomena:e.target.value}))} rows={4} style={{...inp({background:C.bg3,resize:"vertical"})}}/>
             </div>
-            <button onClick={posaljiUpit} disabled={!kontakt.ime||!kontakt.telefon}
-              style={{width:"100%",...btn("gold",{padding:"13px",fontSize:14}),background:kontakt.ime&&kontakt.telefon?`linear-gradient(135deg, ${C.goldL}, ${C.gold})`:C.border,color:kontakt.ime&&kontakt.telefon?"#fff":C.dim,cursor:kontakt.ime&&kontakt.telefon?"pointer":"not-allowed"}}>
+            {(()=>{const ok=kontakt.ime&&kontakt.telefon&&telefonValidan&&emailValidan;return(
+            <button onClick={posaljiUpit} disabled={!ok}
+              style={{width:"100%",...btn("gold",{padding:"13px",fontSize:14}),background:ok?`linear-gradient(135deg, ${C.goldL}, ${C.gold})`:C.border,color:ok?"#fff":C.dim,cursor:ok?"pointer":"not-allowed"}}>
               Pošalji upit izvođaču
-            </button>
+            </button>);})()}
           </div>
           <div style={{width:300,background:C.bg3,borderLeft:`1px solid ${C.border}`,padding:"1.5rem",overflow:"auto"}}>
             <p style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",margin:"0 0 12px"}}>Vaš predmjer</p>
