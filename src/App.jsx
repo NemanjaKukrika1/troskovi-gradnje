@@ -429,18 +429,21 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
     r.splice(to,0,item);
     return r;
   };
-  const dragProps = (stavkaId, katId, isFaza=false) => ({
+  // type: "stavka" | "fazaStavka" | "faza"
+  const dragProps = (id, katId, type="stavka") => ({
     draggable: true,
-    onDragStart: ()=>{ dragSrc.current={stavkaId,katId,isFaza}; },
-    onDragOver: e=>{ e.preventDefault(); setDragOver(stavkaId); },
+    onDragStart: ()=>{ dragSrc.current={id,katId,type}; },
+    onDragOver: e=>{ e.preventDefault(); setDragOver(id); },
     onDragLeave: ()=>setDragOver(null),
     onDrop: e=>{ e.preventDefault(); setDragOver(null);
       const src=dragSrc.current;
-      if(!src||src.stavkaId===stavkaId) return;
-      if(isFaza) {
-        setFazeKatLok(prev=>{const next={...prev,[katId]:reorder(prev[katId]||[],src.stavkaId,stavkaId)};setFazePromjene(true);return next;});
+      if(!src||src.id===id||src.type!==type) return;
+      if(type==="faza") {
+        saveFazeList(reorder(fazeList,src.id,id));
+      } else if(type==="fazaStavka") {
+        setFazeKatLok(prev=>{const next={...prev,[katId]:reorder(prev[katId]||[],src.id,id)};setFazePromjene(true);return next;});
       } else {
-        setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:reorder(k.stavke,src.stavkaId,stavkaId)}));
+        setKategorije(prev=>prev.map(k=>k.id!==katId?k:{...k,stavke:reorder(k.stavke,src.id,id)}));
       }
       dragSrc.current=null;
     },
@@ -885,7 +888,7 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                   {kat.stavke.map(s=>{
                     const key=`${kat.id}-${s.id}`;const em=editCijena[key]!==undefined;
                     return (
-                      <div key={s.id} {...dragProps(s.id,kat.id)} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
+                      <div key={s.id} {...dragProps(s.id,kat.id,"stavka")} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
                         <span style={{color:C.dim,fontSize:16,flexShrink:0,cursor:"grab"}}>⠿</span>
                         <div style={{flex:1,minWidth:0}}>
                           <p style={{margin:"0 0 2px",fontSize:13,color:C.text}}>{s.naziv}</p>
@@ -945,7 +948,8 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
             <div style={{padding:"12px 14px",borderBottom:`1px solid ${C.border}`}}><p style={{fontSize:11,color:C.dim,fontWeight:600,letterSpacing:"0.08em",textTransform:"uppercase",margin:0}}>Faze gradnje</p></div>
             <div style={{flex:1,overflow:"auto"}}>
               {fazeList.map(f=>(
-                <div key={f.id} onClick={()=>setAktivnaAdminFaza(f.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktivnaAdminFaza===f.id?C.bg:C.bg3,borderLeft:aktivnaAdminFaza===f.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"pointer",position:"relative"}}>
+                <div key={f.id} {...dragProps(f.id,null,"faza")} onClick={()=>setAktivnaAdminFaza(f.id)} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 14px",background:aktivnaAdminFaza===f.id?C.bg:C.bg3,borderLeft:aktivnaAdminFaza===f.id?`3px solid ${C.gold}`:"3px solid transparent",cursor:"grab",position:"relative",border:"none",borderTop:`1px solid ${dragOver===f.id?C.gold:"transparent"}`,transition:"border-color 0.15s"}}>
+                  <span style={{color:C.dim,fontSize:14,flexShrink:0}}>⠿</span>
                   <span style={{fontSize:18}}>{f.ikona}</span>
                   <div style={{flex:1,minWidth:0}}>
                     <p style={{margin:0,fontSize:13,color:aktivnaAdminFaza===f.id?C.text:C.muted,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{f.naziv}</p>
@@ -992,7 +996,7 @@ function AdminPanel({kategorije:katInit,setKategorije:syncKategorije,upiti,setUp
                       setEditFazaCijena(p=>{const n={...p};delete n[s.id];return n;});
                     };
                     return (
-                      <div key={s.id} {...dragProps(s.id,aktivnaAdminFaza,true)} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
+                      <div key={s.id} {...dragProps(s.id,aktivnaAdminFaza,"fazaStavka")} style={{...card(),padding:"12px 16px",display:"flex",alignItems:"center",gap:12,cursor:"grab",border:`1px solid ${dragOver===s.id?C.gold:C.border}`,transition:"border-color 0.15s"}}>
                         <span style={{color:C.dim,fontSize:16,flexShrink:0,cursor:"grab"}}>⠿</span>
                         <div style={{flex:1,minWidth:0}}>
                           <p style={{margin:"0 0 2px",fontSize:13,color:C.text}}>{s.naziv}</p>
