@@ -109,3 +109,14 @@ code {
   padding: 4px 8px;
   background: var(--code-bg);
 }
+
+body {
+  margin: 0;
+  background: #F7F5F0;
+  color: #1C1A16;
+  font-family: 'DM Sans', 'Segoe UI Variable', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
